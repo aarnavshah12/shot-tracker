@@ -109,6 +109,10 @@ class ShotStateMachine:
     def active_shot_id(self) -> Optional[int]:
         return self._shot.shot_id if self._shot else None
 
+    @property
+    def active_release_frame(self) -> Optional[int]:
+        return self._shot.release_frame if self._shot else None
+
     def update(
         self,
         ball: Optional[BallTrack],
@@ -117,12 +121,15 @@ class ShotStateMachine:
         t: float,
         px_per_m: Optional[float],
         px_per_m_hint: Optional[float] = None,
+        wrists: Optional[list[tuple[float, float]]] = None,
     ) -> Optional[ShotEvent]:
         """Advance one frame; returns a ShotEvent on the frame a verdict lands.
 
         ``px_per_m`` feeds metrics (strict: None -> null). ``px_per_m_hint``
         feeds thresholds only and may be a last-known scale surviving a
-        calibration reset."""
+        calibration reset. ``wrists`` is the frame's trusted wrist positions
+        (None/empty = no pose information: release detection falls back to
+        velocity-only)."""
         if rim_box is not None:
             self._last_rim_box = rim_box
         else:
@@ -134,7 +141,9 @@ class ShotStateMachine:
             self._phase = ShotPhase.IDLE
 
         if self._phase is ShotPhase.IDLE:
-            self._update_idle(ball, rim_box, frame_index, t, px_per_m_hint or px_per_m)
+            self._update_idle(
+                ball, rim_box, frame_index, t, px_per_m_hint or px_per_m, wrists
+            )
             return None
         return self._update_airborne(ball, rim_box, frame_index, t, px_per_m)
 
@@ -147,6 +156,7 @@ class ShotStateMachine:
         frame_index: int,
         t: float,
         scale_hint: Optional[float],
+        wrists: Optional[list[tuple[float, float]]],
     ) -> None:
         observed = ball is not None and not ball.interpolated
         if self._await_exit and observed:
@@ -161,17 +171,32 @@ class ShotStateMachine:
             ):
                 self._await_exit = False
 
-        # Threshold in m/s once the session has (or ever had) a scale — a
-        # launch is ~7 m/s, raising the ball into the pocket ~1-2 m/s; the px
-        # fallback covers only the never-calibrated cold start.
+        # Release rule (plan 5). With trusted wrists: ball separated from the
+        # wrist neighborhood AND rising at a low floor — ball-in-hand frames
+        # (windups, pump fakes) can never count. Without pose information:
+        # velocity-only at the higher floor, the pre-M3 rule.
+        separated = True
+        if wrists and observed:
+            if scale_hint is not None:
+                sep_px = self._cfg.release_separation_m * scale_hint
+            else:
+                sep_px = self._cfg.release_separation_px
+            separated = all(
+                (ball.x - wx) ** 2 + (ball.y - wy) ** 2 > sep_px * sep_px
+                for wx, wy in wrists
+            )
+            floor_ms = self._cfg.release_min_upward_speed_with_pose_ms
+        else:
+            floor_ms = self._cfg.release_min_upward_speed_ms
         if scale_hint is not None:
-            min_up = self._cfg.release_min_upward_speed_ms * scale_hint
+            min_up = floor_ms * scale_hint
         else:
             min_up = self._cfg.release_min_upward_speed_px_s
         rising = (
             observed
             and not self._await_exit
             and ball.velocity_valid
+            and separated
             and ball.vy <= -min_up
         )
         if not rising:

@@ -530,6 +530,107 @@ def test_no_rim_geometry_does_not_wedge_the_machine():
     assert states[-1].phase is ShotPhase.IDLE
 
 
+# ----------------------------------------------------------------- pose (M3)
+
+
+def full_pose(wrist: tuple[float, float], conf: float = 0.9):
+    """A complete upright COCO-17 pose with the right wrist at ``wrist``."""
+    from engine.types import PoseState
+
+    wx, wy = wrist
+    joints = {
+        "nose": (700, 760), "left_eye": (695, 755), "right_eye": (705, 755),
+        "left_ear": (690, 758), "right_ear": (710, 758),
+        "left_shoulder": (680, 790), "right_shoulder": (720, 790),
+        "left_elbow": (670, 840), "right_elbow": (735, 845),
+        "left_wrist": (660, 890), "right_wrist": (wx, wy),
+        "left_hip": (685, 880), "right_hip": (715, 880),
+        "left_knee": (683, 940), "right_knee": (717, 940),
+        "left_ankle": (680, 1000), "right_ankle": (720, 1000),
+    }
+    return PoseState(
+        keypoints={k: (float(x), float(y), conf) for k, (x, y) in joints.items()}
+    )
+
+
+def test_wrist_rule_blocks_pump_fake():
+    """Ball raised to rim height and lowered, wrists riding with it the whole
+    time: with pose, the separation rule means this can never arm — the
+    pre-M3 phantom clean-miss is gone."""
+    positions = {i: (950.0, 600.0) for i in range(10)}
+    for i in range(10, 31):
+        positions[i] = (950.0, 600.0 - 12.0 * (i - 10))  # 720 px/s raise
+    for i in range(31, 40):
+        positions[i] = (950.0, 348.0)  # held at rim height
+    for i in range(40, 55):
+        positions[i] = (950.0, 348.0 + 15.0 * (i - 40))  # lowered
+
+    def pose_model(frame_index):
+        pos = positions.get(frame_index)
+        return full_pose(pos) if pos else None  # wrists ride with the ball
+
+    engine = ShotEngine(
+        EngineConfig.upload(),
+        detector=scripted_detector(positions),
+        pose_model=pose_model,
+    )
+    states = [engine.process_frame(i, i / FPS) for i in range(max(positions) + 6)]
+    assert events_of(states) == []
+    assert all(s.phase is ShotPhase.IDLE for s in states)
+
+
+def test_wrist_separation_arms_release_and_fills_form_metrics():
+    """With pose, release arms when the ball leaves the wrist neighborhood,
+    and the resolved event carries confidence-gated form metrics."""
+    positions = make_shot_positions()
+
+    def pose_model(frame_index):
+        return full_pose((700.0, 900.0))  # shooter stays put; ball departs
+
+    engine = ShotEngine(
+        EngineConfig.upload(),
+        detector=scripted_detector(positions),
+        pose_model=pose_model,
+    )
+    states = [engine.process_frame(i, i / FPS) for i in range(max(positions) + 6)]
+    events = events_of(states)
+    assert len(events) == 1
+    e = events[0]
+    assert e.verdict is Verdict.MAKE
+    # Separation reached one frame after launch (frame 10 is still within the
+    # wrist radius); the streak begins at 11.
+    assert e.frames[0] == 11
+    assert e.elbow_deg is not None and 0.0 < e.elbow_deg < 180.0
+    assert e.knee_deg is not None and 0.0 < e.knee_deg < 180.0
+    assert e.shoulder_hip_deg is not None and 0.0 <= e.shoulder_hip_deg < 45.0
+    # Ball at release y~765 vs grounded ankle y=1000 at ~219.8 px/m.
+    assert e.release_height_m == pytest.approx(1.07, abs=0.15)
+    assert states[20].pose is not None  # skeleton reaches the renderer
+
+
+def test_low_confidence_pose_nulls_form_metrics():
+    """Untrusted keypoints at release: metrics are null, never garbage, and
+    release detection falls back to the velocity-only rule."""
+    positions = make_shot_positions()
+
+    def pose_model(frame_index):
+        return full_pose((700.0, 900.0), conf=0.2)  # below keypoint_confidence
+
+    engine = ShotEngine(
+        EngineConfig.upload(),
+        detector=scripted_detector(positions),
+        pose_model=pose_model,
+    )
+    states = [engine.process_frame(i, i / FPS) for i in range(max(positions) + 6)]
+    events = events_of(states)
+    assert len(events) == 1
+    e = events[0]
+    assert e.verdict is Verdict.MAKE
+    assert e.frames[0] == 10  # velocity-only rule: streak starts at launch
+    assert e.elbow_deg is None and e.knee_deg is None
+    assert e.shoulder_hip_deg is None and e.release_height_m is None
+
+
 # ------------------------------------------------------------ event log shape
 
 
@@ -578,7 +679,8 @@ def test_modes_differ_only_in_model_size_config():
         "max_gap_frames", "gate_base_px", "gate_speed_factor", "gate_gap_growth_px",
         "velocity_smoothing", "velocity_history_max_s", "reseed_speed_px_s",
         "release_consecutive_frames", "release_min_upward_speed_ms",
-        "release_min_upward_speed_px_s",
+        "release_min_upward_speed_px_s", "release_separation_m",
+        "release_separation_px", "release_min_upward_speed_with_pose_ms",
         "rim_neighborhood_scale", "occlusion_frames_for_make",
         "crossing_bridge_max_frames",
         "occlusion_hold_frames", "span_tolerance_frac", "max_shot_seconds",

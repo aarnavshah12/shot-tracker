@@ -22,7 +22,7 @@ class DetectorConfig:
 
 @dataclass(frozen=True)
 class PoseConfig:
-    enabled: bool = False  # flipped on at M3
+    enabled: bool = True  # M3: zero-shot RF-DETR Keypoint
     keypoint_confidence: float = 0.5  # below this at release -> form metrics are null
     every_n_frames: int = 1  # live mode may raise this at M5 (model-size/perf config)
 
@@ -55,6 +55,13 @@ class EngineConfig:
     # both; until then this is a documented wrong-verdict class near the rim.)
     release_consecutive_frames: int = 3
     release_min_upward_speed_ms: float = 2.0
+    # With trusted wrist positions (M3 pose), the release rule becomes the
+    # plan-5 original: ball separated from the wrist neighborhood AND rising.
+    # Separation excludes ball-in-hand frames, so the velocity floor drops —
+    # soft floaters arm, pump fakes never do.
+    release_separation_m: float = 0.35
+    release_separation_px: float = 60.0  # pre-calibration fallback
+    release_min_upward_speed_with_pose_ms: float = 1.2
     # Pre-calibration fallback. 400 px/s sits at 1.8-2.9 m/s across the
     # scales measured on real sessions (140-220 px/m) — close to the m/s
     # floor instead of the far-too-permissive 200. The calibration hint

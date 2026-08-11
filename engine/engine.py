@@ -12,6 +12,7 @@ import math
 from collections import deque
 from typing import Callable, Optional
 
+from engine import form
 from engine.calibration import ScaleCalibration
 from engine.config import EngineConfig
 from engine.state_machine import ShotStateMachine
@@ -45,6 +46,15 @@ class ShotEngine:
         self._last_t = 0.0
         self._dt_estimate = 1.0 / 30.0
         self._finalized = False
+        self._last_pose: Optional[PoseState] = None
+        # Recent (frame_index, pose, ball_xy) for release-frame form metrics:
+        # a shot arms release_consecutive_frames after its release frame, so a
+        # short ring suffices.
+        self._recent: deque[tuple[int, Optional[PoseState], Optional[tuple[float, float]]]] = (
+            deque(maxlen=8)
+        )
+        self._release_stash: dict[int, tuple[Optional[PoseState], Optional[tuple[float, float]]]] = {}
+        self._stashed_shot: Optional[int] = None
 
     @property
     def calibration(self) -> ScaleCalibration:
@@ -90,13 +100,21 @@ class ShotEngine:
         elif self._trail:
             self._trail.clear()
 
+        pose = self._update_pose(frame)
+        wrists = form.confident_wrists(pose, self.config.pose.keypoint_confidence)
+
+        ball_xy = (ball.x, ball.y) if ball is not None and not ball.interpolated else None
+        self._recent.append((self._frame_index, pose, ball_xy))
+
         px_per_m = self._calibration.px_per_m
         event = self._machine.update(
             ball, rim_box, self._frame_index, t, px_per_m,
             px_per_m_hint=self._calibration.px_per_m_hint,
+            wrists=wrists,
         )
-
-        pose = self._pose_model(frame) if self._pose_model and self.config.pose.enabled else None
+        self._stash_release_context()
+        if event is not None:
+            self._fill_form_metrics(event, px_per_m)
 
         return FrameState(
             frame_index=self._frame_index,
@@ -112,6 +130,40 @@ class ShotEngine:
             distance_to_rim_m=self._distance_to_rim_m(ball, rim_box, px_per_m),
             current_speed_ms=self._speed_ms(ball, px_per_m),
         )
+
+    def _update_pose(self, frame: object) -> Optional[PoseState]:
+        if self._pose_model is None or not self.config.pose.enabled:
+            return None
+        n = max(1, self.config.pose.every_n_frames)
+        if self._frame_index % n == 0:
+            self._last_pose = self._pose_model(frame)
+        return self._last_pose  # carried forward on skipped frames (M5 cadence)
+
+    def _stash_release_context(self) -> None:
+        """When a shot arms, remember the pose + ball position at its release
+        frame so form metrics can be computed at resolution time."""
+        shot_id = self._machine.active_shot_id
+        if shot_id is None or shot_id == self._stashed_shot:
+            return
+        self._stashed_shot = shot_id
+        release_frame = self._machine.active_release_frame
+        best = None
+        for f, pose, ball_xy in self._recent:
+            if abs(f - release_frame) <= 2 and (best is None or abs(f - release_frame) < best[0]):
+                best = (abs(f - release_frame), pose, ball_xy)
+        self._release_stash[shot_id] = (best[1], best[2]) if best else (None, None)
+        while len(self._release_stash) > 4:
+            self._release_stash.pop(next(iter(self._release_stash)))
+
+    def _fill_form_metrics(self, event: ShotEvent, px_per_m: Optional[float]) -> None:
+        pose, ball_xy = self._release_stash.pop(event.shot_id, (None, None))
+        metrics = form.release_form_metrics(
+            pose, ball_xy, px_per_m, self.config.pose.keypoint_confidence
+        )
+        event.elbow_deg = metrics["elbow_deg"]
+        event.knee_deg = metrics["knee_deg"]
+        event.shoulder_hip_deg = metrics["shoulder_hip_deg"]
+        event.release_height_m = metrics["release_height_m"]
 
     def finalize(self) -> list[ShotEvent]:
         """The stream ended. A shot still open at end-of-stream is a real
@@ -134,6 +186,7 @@ class ShotEngine:
                 None, rim_box, self._frame_index, self._last_t, px_per_m
             )
             if event:
+                self._fill_form_metrics(event, px_per_m)
                 events.append(event)
         return events
 

@@ -18,9 +18,16 @@ DETECTOR_CLASSES = ("ball", "rim")
 # model ID. Installed and pinned at M1:
 INFERENCE_VERSION_PIN = "1.3.10"
 
-# Pose: RF-DETR Keypoint, pretrained COCO-17 checkpoint, zero-shot (M3).
-# rfdetr is a preview API — the exact pin is chosen when the package is
-# installed at M3 and recorded here. NOTE: the keypoint schema default
-# changed to active-first in 1.8.x; verify which side of that line the pin
-# lands on before parsing keypoints.
-RFDETR_VERSION_PIN: str | None = None  # set at install time, e.g. "1.8.1"
+# Pose: RF-DETR Keypoint (RFDETRKeypointPreview), pretrained COCO-17
+# checkpoint, zero-shot. rfdetr is a preview API — keep it pinned. Keypoint
+# ordering VERIFIED EMPIRICALLY on 1.9.2 (indexed overlay on real footage,
+# 2026-08-11): standard COCO-17 order, indices below. Re-verify the overlay
+# if this pin ever moves (the schema default changed around 1.8.x).
+RFDETR_VERSION_PIN = "1.9.2"
+
+COCO_KEYPOINTS = (
+    "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+    "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+    "left_wrist", "right_wrist", "left_hip", "right_hip",
+    "left_knee", "right_knee", "left_ankle", "right_ankle",
+)

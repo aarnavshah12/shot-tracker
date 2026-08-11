@@ -20,11 +20,12 @@ import cv2
 from engine.config import EngineConfig
 from engine.engine import ShotEngine
 from models.detector import RFDETRDetector
+from models.pose import RFDETRPoseModel
 from models.registry import DETECTOR_V0_MODEL_ID
 
 
-def process_clip(clip: Path, detector, cfg: EngineConfig) -> dict:
-    engine = ShotEngine(cfg, detector=detector)
+def process_clip(clip: Path, detector, cfg: EngineConfig, pose_model=None) -> dict:
+    engine = ShotEngine(cfg, detector=detector, pose_model=pose_model)
     cap = cv2.VideoCapture(str(clip))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     rows, events = [], []
@@ -37,6 +38,7 @@ def process_clip(clip: Path, detector, cfg: EngineConfig) -> dict:
         rows.append(
             {
                 "f": i,
+                "pose": st.pose is not None,
                 "ball": [round(st.ball.x, 1), round(st.ball.y, 1)] if st.ball else None,
                 "ball_interp": st.ball.interpolated if st.ball else None,
                 "ball_vy": round(st.ball.vy, 1) if st.ball else None,
@@ -73,13 +75,14 @@ def main() -> None:
         ball_confidence=cfg.detector.ball_confidence,
         rim_confidence=cfg.detector.rim_confidence,
     )
+    pose_model = RFDETRPoseModel() if cfg.pose.enabled else None
 
     for clip in sorted(footage.glob("*.MOV")):
         out_file = out_dir / (clip.stem + ".json")
         if out_file.exists():
             print(f"{clip.name}: cached", flush=True)
             continue
-        result = process_clip(clip, detector, cfg)
+        result = process_clip(clip, detector, cfg, pose_model)
         out_file.write_text(json.dumps(result))
         print(
             f"{clip.name}: {result['frames']} frames, {len(result['events'])} events",
