@@ -9,7 +9,7 @@ Driveway shot tracker build log. Milestones M0–M6 per the build plan.
 | M0 Repo + engine skeleton | **done** 2026-08-11 | acceptance test green; two adversarial review rounds applied |
 | M1 Detector v0 integration | **done** 2026-08-11 | ball-in-flight 98.1% (target 90) PASS; rim IoU gap logged as M6 fine-tune input |
 | M2 Shot logic | **done** 2026-08-11 — 23/23 after verification-round fixes | owner substituted 23 labeled clips for the 50-shot clip; caveats in M2 summary |
-| M3 Pose | acceptance PASSED (23/23 shots with elbow+knee, target 80%); verification round in flight | zero-shot RF-DETR Keypoint, rfdetr==1.9.2 pinned |
+| M3 Pose | **done** 2026-08-11 — form on 23/23 shots (target 80%), scorecard held 23/23 after verification fixes | zero-shot RF-DETR Keypoint, rfdetr==1.9.2 pinned |
 | M4 Renderer | not started | reference layout documented from owner's screenshots |
 | M5 Modes | not started | |
 | M6 Precision + polish | not started | fine-tune inputs logged below |
@@ -198,3 +198,19 @@ COCO-17 ordering verified by drawing indexed keypoints on real footage).
   delivered (sessions/previews/*_pose_debug.mp4).
 - Adapter hardened: empty-frame detections (shooter out of frame) return
   None instead of crashing (found by the 23-clip run on 7108).
+
+- **2026-08-11 (night)** — M3 verification round: 19 findings (3 lenses). Fix
+  round: release rule restructured into strong (2.0 m/s velocity, backbone;
+  wrist veto bounded at 8 frames so a keypoint stuck on the ball can never
+  delete a real make) + soft (1.2 m/s extension gated on both wrists trusted,
+  separation, ball above hands — blocks one-wrist fakes and sub-2 m/s dribble
+  bounces); release stash keyed+validated by release frame with discard
+  cleanup (form metrics can no longer come from the wrong frame);
+  shooting-side nulls instead of switching to the guide arm; inverted-pose
+  tilt nulls; pose exceptions degrade to no-pose instead of aborting runs;
+  supervision pinned <0.32 and adapter moved off the deprecated field;
+  release_height serialized at 2 decimals; evaluators fail loudly. All
+  verifier repro scripts confirm; 36 tests green. Residual documented: fast
+  (>=2 m/s) in-hand raises can still arm (pre-M3 parity; discarded as noise
+  or resolved on the real outcome). **M3 closed: form 23/23, scorecard
+  23/23.** Next: M4 renderer.
