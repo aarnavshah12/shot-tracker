@@ -38,6 +38,7 @@ class ShotEngine:
             rim_diameter_m=config.rim_diameter_m,
             max_samples=config.calibration_frames,
             min_samples=config.calibration_min_samples,
+            drift_frames=config.calibration_drift_frames,
         )
         self._frame_index = -1
         self._trail: deque[tuple[float, float]] = deque(maxlen=config.trail_length)

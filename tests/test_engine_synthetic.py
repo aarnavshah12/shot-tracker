@@ -295,9 +295,95 @@ def test_rim_out_is_a_rattled_miss():
     assert len(events) == 1
     assert events[0].verdict is Verdict.MISS
     assert events[0].verdict_confidence is VerdictConfidence.RATTLED
-    # Resolved on neighborhood exit (y < 150), not at the first pop-out frame.
-    assert events[0].frames[1] == 45
+    # Not resolved at the first pop-out frame (36-38); resolved once the pop
+    # exceeds one rim width above the rim top (y < 180, frame 43).
+    assert events[0].frames[1] == 43
     assert states[-1].phase is ShotPhase.IDLE
+
+
+def test_high_bounce_rejection_is_one_rattled_miss():
+    """Ball crosses in-span but gets launched high off the back rim (more
+    than a rim width above the top): a rejection — one rattled miss, resolved
+    at the pop-height threshold, and the fall-back-through afterwards must
+    not create a second event."""
+    positions = {i: (700.0, 900.0) for i in range(5)}
+    positions |= arc_positions(5, 708.0, apex_x=870.0, apex_y=150.0, last_x=948.0)
+    after = max(positions)  # frame 35: crossing frame
+    flight = [
+        (952.0, 296.0), (954.0, 250.0), (956.0, 200.0), (958.0, 160.0),  # rejection up
+        (960.0, 120.0), (962.0, 140.0), (964.0, 170.0), (966.0, 220.0),  # back down...
+        (968.0, 290.0), (970.0, 360.0),  # ...through the span again
+    ]
+    for k, pos in enumerate(flight, start=1):
+        positions[after + k] = pos
+    states = run(positions)
+
+    events = events_of(states)
+    assert len(events) == 1
+    assert events[0].verdict is Verdict.MISS
+    assert events[0].verdict_confidence is VerdictConfidence.RATTLED
+    assert events[0].frames[1] == 39  # pop passed one rim width above the top
+    assert states[-1].phase is ShotPhase.IDLE
+
+
+def test_reappearance_after_drop_cannot_arm_phantom_shot():
+    """Ball occluded during a dribble, reappears higher and stationary (the
+    pickup into the shot pocket): the re-seeded track has no measured
+    velocity, so no phantom release can arm."""
+    positions = {i: (700.0, 950.0) for i in range(10)}
+    for i in range(30, 60):
+        positions[i] = (700.0, 600.0)  # reappears 350px higher, then holds
+    states = run(positions)
+
+    assert events_of(states) == []
+    assert all(s.phase is ShotPhase.IDLE for s in states)
+    # And the re-seed frame must not report a fabricated speed.
+    reseed = states[30]
+    assert reseed.ball is not None and not reseed.ball.interpolated
+    assert reseed.current_speed_ms is None
+
+
+def test_false_positive_drizzle_cannot_wedge_the_machine():
+    """Track lost near the rim, then a sporadic false 'ball' detection near
+    the net every 20 frames: the hold must not stay open forever — the shot
+    resolves at the max_shot_seconds cap and the machine returns to IDLE."""
+    positions = {i: (700.0, 900.0) for i in range(5)}
+    positions |= arc_positions(5, 708.0, apex_x=870.0, apex_y=150.0, last_x=852.0)
+    for i in range(40, 401, 20):
+        positions[i] = (940.0, 260.0)  # static near-net false positive
+    states = run(positions, extra=30)
+
+    events = events_of(states)
+    assert len(events) == 1
+    assert events[0].verdict is Verdict.MISS
+    assert events[0].verdict_confidence is VerdictConfidence.OCCLUDED
+    cap_frames = int(EngineConfig.upload().max_shot_seconds * FPS)
+    assert events[0].frames[1] <= events[0].frames[0] + cap_frames + 2
+    assert states[-1].phase is ShotPhase.IDLE
+
+
+def test_calibration_recovers_from_garbage_cold_start():
+    """~1s of garbage rim detections while the camera settles, then the real
+    rim: calibration must reset onto the real rim instead of locking the
+    session to a phantom one (which would silently score nothing)."""
+    garbage = Detection("rim", 0.45, (200.0, 800.0, 240.0, 830.0))
+    positions = {i: (700.0, 900.0) for i in range(100, 110)}
+    positions |= arc_positions(110, 708.0, apex_x=870.0, apex_y=150.0, last_x=1000.0)
+
+    def detect(frame_index):
+        dets = [garbage if frame_index < 55 else rim_det(frame_index)]
+        if frame_index in positions:
+            dets.append(ball_det(*positions[frame_index]))
+        return dets
+
+    engine = ShotEngine(EngineConfig.upload(), detector=detect)
+    states = [engine.process_frame(i, i / FPS) for i in range(max(positions) + 6)]
+
+    events = events_of(states)
+    assert len(events) == 1
+    assert events[0].verdict is Verdict.MAKE
+    # Scale re-derived from the real rim, not the 40px garbage box.
+    assert states[-1].scale_px_per_m == pytest.approx(SCALE_PX_PER_M, rel=0.02)
 
 
 def test_track_lost_near_rim_is_occluded_miss_after_hold():
@@ -389,11 +475,10 @@ def test_shot_event_serializes_to_plan_schema(tmp_path):
     assert summary["fg_pct"] == 100.0
     assert summary["streaks"] == {"current": 1, "best": 1}
 
-    # Re-opening the same session truncates: no duplicate shot_ids ever.
-    with EventLog(tmp_path / "session") as log:
-        for s in states:
-            log.consume(s)
-    assert len((tmp_path / "session" / "shots.jsonl").read_text().splitlines()) == 1
+    # Append semantics within a run (plan 7), but a second run on the same
+    # session must refuse rather than interleave colliding shot_ids.
+    with pytest.raises(FileExistsError):
+        EventLog(tmp_path / "session").__enter__()
 
 
 # ------------------------------------------------------------- config guard
@@ -404,10 +489,12 @@ def test_modes_differ_only_in_model_size_config():
     assert (up.mode, live.mode) == ("upload", "live")
     # Every shot-logic threshold must be identical across modes.
     for field in (
-        "max_gap_frames", "gate_base_px", "gate_speed_factor", "velocity_smoothing",
-        "velocity_history_max_s", "release_consecutive_frames",
-        "release_min_upward_speed_px_s", "rim_neighborhood_scale",
-        "occlusion_frames_for_make", "occlusion_hold_frames", "span_tolerance_frac",
-        "rim_diameter_m", "calibration_frames", "calibration_min_samples",
+        "max_gap_frames", "gate_base_px", "gate_speed_factor", "gate_gap_growth_px",
+        "velocity_smoothing", "velocity_history_max_s", "reseed_speed_px_s",
+        "release_consecutive_frames", "release_min_upward_speed_px_s",
+        "rim_neighborhood_scale", "occlusion_frames_for_make",
+        "occlusion_hold_frames", "span_tolerance_frac", "max_shot_seconds",
+        "rattle_pop_max_rim_widths", "rim_diameter_m", "calibration_frames",
+        "calibration_min_samples", "calibration_drift_frames",
     ):
         assert getattr(up, field) == getattr(live, field), field

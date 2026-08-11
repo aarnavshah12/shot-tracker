@@ -1,9 +1,11 @@
-"""EventLog: writes resolved shots to sessions/<id>/shots.jsonl.
+"""EventLog: appends resolved shots to sessions/<id>/shots.jsonl (plan 7).
 
 File I/O lives here, outside the engine — the engine emits FrameState, this
-consumes it (architecture diagram in the plan). A session dir corresponds to
-one processing run: opening truncates any previous shots.jsonl so re-running
-a session id can't interleave two runs' shot_ids.
+consumes it (architecture diagram in the plan). Append semantics are the
+plan's contract; what is NOT allowed is two processing runs interleaving
+colliding shot_ids in one file, so opening a session that already holds shots
+raises instead of silently appending or truncating. (Crash-resume for live
+mode gets an explicit resume path at M5.)
 """
 
 from __future__ import annotations
@@ -22,7 +24,12 @@ class EventLog:
         self._fh = None
 
     def __enter__(self) -> "EventLog":
-        self._fh = open(self.path, "w", encoding="utf-8")
+        if self.path.exists() and self.path.stat().st_size > 0:
+            raise FileExistsError(
+                f"{self.path} already contains shots from a previous run; "
+                "use a fresh session id (shot_ids restart at 1 per run)"
+            )
+        self._fh = open(self.path, "a", encoding="utf-8")
         return self
 
     def __exit__(self, *exc) -> None:

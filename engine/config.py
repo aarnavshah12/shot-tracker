@@ -37,8 +37,10 @@ class EngineConfig:
     max_gap_frames: int = 4  # extrapolate through detection gaps up to this many frames
     gate_base_px: float = 75.0  # motion-gate radius floor
     gate_speed_factor: float = 1.5  # gate widens with predicted per-frame travel
+    gate_gap_growth_px: float = 50.0  # bounded extra gate per unmatched frame
     velocity_smoothing: float = 0.5  # EMA weight on the newest velocity sample
     velocity_history_max_s: float = 1.0  # older last-observation is too stale for velocity
+    reseed_speed_px_s: float = 2500.0  # max plausible ball speed for post-drop re-seeding
 
     # Release detection (plan 5): sustained upward velocity over 3 consecutive frames
     release_consecutive_frames: int = 3
@@ -49,6 +51,12 @@ class EngineConfig:
     occlusion_frames_for_make: int = 2  # occluded >= this after crossing, reappears below -> make
     occlusion_hold_frames: int = 30  # track lost mid-shot: wait this long for reappearance
     span_tolerance_frac: float = 0.25  # lateral slack (x rim width) on the reappears-below check
+    max_shot_seconds: float = 6.0  # hard cap on one attempt; kills any wedged hold
+    rattle_pop_max_rim_widths: float = 1.0  # pop-out higher than this above the rim = rejection
+
+    # Calibration recovery: live rim steadily contradicting the median box
+    # for this many frames resets calibration (garbage cold-start / camera bump)
+    calibration_drift_frames: int = 30
 
     # Calibration (plan 5): rim inner diameter 18in; median rim width over first 100 frames
     rim_diameter_m: float = 0.4572
