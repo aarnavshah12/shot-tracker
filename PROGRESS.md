@@ -9,7 +9,7 @@ Driveway shot tracker build log. Milestones M0–M6 per the build plan.
 | M0 Repo + engine skeleton | **done** 2026-08-11 | acceptance test green; two adversarial review rounds applied |
 | M1 Detector v0 integration | **done** 2026-08-11 | ball-in-flight 98.1% (target 90) PASS; rim IoU gap logged as M6 fine-tune input |
 | M2 Shot logic | **done** 2026-08-11 — 23/23 after verification-round fixes | owner substituted 23 labeled clips for the 50-shot clip; caveats in M2 summary |
-| M3 Pose | not started | needed to fix release-timing accuracy (wrist rule) |
+| M3 Pose | acceptance PASSED (23/23 shots with elbow+knee, target 80%); verification round in flight | zero-shot RF-DETR Keypoint, rfdetr==1.9.2 pinned |
 | M4 Renderer | not started | reference layout documented from owner's screenshots |
 | M5 Modes | not started | |
 | M6 Precision + polish | not started | fine-tune inputs logged below |
@@ -173,3 +173,28 @@ documented** (11 sim-backed scenarios now match ground truth):
 - **2026-08-11** — Detector v0 still `running` at last poll (~15:40 UTC). Next: poll on next session/wake; M1 starts when training completes AND first footage arrives.
 - **2026-08-11 (pm)** — Training finished (mAP50 88.84). Owner delivered 17 clips (30 fps) into `footage/session-2026-08-11/` and the AA reference screenshots (transcribed to `assets/reference/aa-reference-layout.md`). Wired RFDETRDetector through pinned inference runtime; ran all clips; fixed calibration drift thrash, early-release arming, and added end-of-stream finalize. **M1 closed**: ball 98.1% PASS; rim box stability shortfall documented as M6 fine-tune input. Owner question noted: Roboflow Workflows deliberately not used — plan architecture injects the detector as a local callable into our stateful engine ("free and local" product angle; Workflows wrap only the detection block and add a serving hop).
 - **2026-08-11 (eve)** — Owner delivered full 23-clip ground truth. Two initially-wrong makes (7090/7109) root-caused to net-occluded crossings → bridged-crossing rule; 7103 segmented via 2.0 m/s release floor. Verification round: 12 findings → round-3 fixes (fall-speed bridge discriminator, ceiling hold, evidence-first 10 s cap, rim memory, scale hint, finalize guard); pump-fake phantom documented as the M3 dependency. **M2 closed: 23/23 re-confirmed post-fixes** (0 segmentation, 0 verdict errors; 26 unit tests + all attack sims green). Debug-overlay previews delivered to owner in sessions/previews/. Next: M3 pose.
+
+## M3 summary (2026-08-11)
+
+Zero-shot RF-DETR Keypoint (`RFDETRKeypointPreview`, rfdetr==1.9.2 pinned;
+COCO-17 ordering verified by drawing indexed keypoints on real footage).
+
+- **Acceptance: elbow+knee angles on 23/23 shots (100%; target ≥80%)**, pose
+  on 99% of frames, all values confidence-gated (nulls, never garbage).
+- **M2 scorecard unchanged at 23/23** under the new release rule.
+- Release rule is now plan-5's original: ball separated from the wrist
+  neighborhood (0.35 m via scale) + rising at a 1.2 m/s floor; ball-in-hand
+  frames can never arm → the pump-fake phantom class is gone (regression
+  test). Velocity-only fallback (2.0 m/s) when pose is absent/untrusted.
+- Release timing sharpened: release velocities now 2.6–8.7 m/s across the
+  session (was 3.6–6.6 with early windup arms; the 2.6 is the genuine soft
+  floater 7103).
+- Form metrics per shot: elbow, knee (shooting side = wrist nearest ball),
+  torso tilt (unsigned, |lean| only — direction needs 3D or facing info),
+  release height (ball above grounded-ankle reference — approximate on jump
+  shots; noted for M6). Elbow 131–173°, knee 154–180°, heights 1.1–2.4 m —
+  physically plausible across all 23.
+- Pose rides FrameState for the M4 renderer; pose-debug preview videos
+  delivered (sessions/previews/*_pose_debug.mp4).
+- Adapter hardened: empty-frame detections (shooter out of frame) return
+  None instead of crashing (found by the 23-clip run on 7108).
