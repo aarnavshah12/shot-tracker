@@ -8,7 +8,7 @@ Driveway shot tracker build log. Milestones M0–M6 per the build plan.
 |---|---|---|
 | M0 Repo + engine skeleton | **done** 2026-08-11 | acceptance test green; two adversarial review rounds applied |
 | M1 Detector v0 integration | **done** 2026-08-11 | ball-in-flight 98.1% (target 90) PASS; rim IoU gap logged as M6 fine-tune input |
-| M2 Shot logic | engine built and exercised on real clips; acceptance pending owner's 50-shot ground truth | 16/17 clips segmented; 1 false make (audit-flagged rattled) |
+| M2 Shot logic | **23/23 on owner-labeled session** (pending adversarial verification round) | owner substituted 23 labeled clips for the 50-shot clip; eval set = tuning set, see caveat |
 | M3 Pose | not started | needed to fix release-timing accuracy (wrist rule) |
 | M4 Renderer | not started | reference layout documented from owner's screenshots |
 | M5 Modes | not started | |
@@ -110,6 +110,33 @@ Known limitations (documented decisions, revisit at M2/M6 with real footage):
   frames (upload mode is immune: timestamps are synthesized frame_index/fps).
 - Thresholds are in pixels (release speed, gates) and assume ~1080p-scale
   footage; M2 tuning on real clips should express them via calibration scale.
+
+## M2 summary (2026-08-11)
+
+Owner declined recording a fresh 50-shot session and substituted full labels
+for session-2026-08-11 (23 clips, one attempt each; makes: 7090, 7097, 7101,
+7109 — recorded in `scripts/groundtruth/session-2026-08-11.json`).
+
+**Scorecard: 23/23 — zero segmentation errors, zero verdict errors**
+(`scripts/m2_eval.py`; proportional bar was ≥21/23). The two labels that
+initially failed drove real fixes:
+
+- 7090/7109 (makes scored miss): the rim-top crossing hid inside a 1–2 frame
+  detection gap — net occlusion at the crossing, plan 6.3's exact case. Fix:
+  crossings may bridge a ≤4-frame gap between *observed* endpoints that hug
+  the rim (last seen ≤2 rim-heights above the top, reappearing ≤1 rim-height
+  below the bottom, interpolated x-cross strictly in-span), flagged
+  `occluded`. Behind-the-rim airball attacks from the M0 review still resolve
+  correctly (re-verified).
+- 7103 (soft launch unsegmented): release floor lowered to 2.0 m/s. Windups
+  reaching 2.0–3.6 m/s may arm early — this skews release *timing/metrics*
+  on some shots, never verdicts, until M3's wrist-separation rule.
+
+Caveats, recorded honestly: the 23 clips served as both tuning set and eval
+set (the plan's fresh-clip design avoids this); the session is 30 fps where
+the plan asked for 60; and n=23 < 50. M6's re-eval (≥48/50 equivalent) should
+use fresh footage. Adversarial verification round on the M1/M2-era engine
+changes launched before closing the milestone.
 
 ## Log
 
