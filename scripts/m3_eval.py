@@ -19,6 +19,10 @@ def main() -> None:
     pose_frames = total_frames = 0
     for f in sorted(diag_dir.glob("*.json")):
         d = json.loads(f.read_text())
+        if d["rows"] and "pose" not in d["rows"][0]:
+            print(f"FAIL: {f.name} predates the pose-enabled diagnostics — "
+                  "delete sessions/m1-diag and re-run scripts/m1_diagnostics.py")
+            raise SystemExit(2)
         total_frames += d["frames"]
         pose_frames += sum(1 for r in d["rows"] if r.get("pose"))
         for e in d["events"]:
@@ -29,12 +33,15 @@ def main() -> None:
                   f"elbow={e['elbow_deg']} knee={e['knee_deg']} "
                   f"tilt={e['shoulder_hip_deg']} rel_h={e['release_height_m']} "
                   f"rel_v={e['release_velocity_ms']} {'✓' if has else '∅ (nulled)'}")
-    if shots:
-        pct = 100 * with_form / shots
-        print(f"\npose coverage: {pose_frames}/{total_frames} frames "
-              f"({100 * pose_frames / max(1, total_frames):.0f}%)")
-        print(f"=== M3 ACCEPTANCE: elbow+knee on {with_form}/{shots} shots "
-              f"({pct:.0f}%)  [target >= 80%] ===")
+    if not shots:
+        print("FAIL: no shots found in diagnostics — nothing to evaluate")
+        raise SystemExit(2)
+    pct = 100 * with_form / shots
+    print(f"\npose coverage: {pose_frames}/{total_frames} frames "
+          f"({100 * pose_frames / max(1, total_frames):.0f}%)")
+    print(f"=== M3 ACCEPTANCE: elbow+knee on {with_form}/{shots} shots "
+          f"({pct:.0f}%)  [target >= 80%] ===")
+    raise SystemExit(0 if pct >= 80 else 1)
 
 
 if __name__ == "__main__":

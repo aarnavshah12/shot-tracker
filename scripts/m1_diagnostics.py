@@ -38,7 +38,7 @@ def process_clip(clip: Path, detector, cfg: EngineConfig, pose_model=None) -> di
         rows.append(
             {
                 "f": i,
-                "pose": st.pose is not None,
+                "pose": st.pose is not None and not st.pose_stale,
                 "ball": [round(st.ball.x, 1), round(st.ball.y, 1)] if st.ball else None,
                 "ball_interp": st.ball.interpolated if st.ball else None,
                 "ball_vy": round(st.ball.vy, 1) if st.ball else None,

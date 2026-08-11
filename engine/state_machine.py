@@ -100,6 +100,7 @@ class ShotStateMachine:
         self._shot: Optional[_ActiveShot] = None
         self._await_exit = False  # post-resolution: ball must leave the rim area once
         self._last_rim_box: Optional[Box] = None
+        self._veto_streak = 0  # consecutive strong-rise frames vetoed by separation
 
     @property
     def phase(self) -> ShotPhase:
@@ -171,34 +172,54 @@ class ShotStateMachine:
             ):
                 self._await_exit = False
 
-        # Release rule (plan 5). With trusted wrists: ball separated from the
-        # wrist neighborhood AND rising at a low floor — ball-in-hand frames
-        # (windups, pump fakes) can never count. Without pose information:
-        # velocity-only at the higher floor, the pre-M3 rule.
-        separated = True
-        if wrists and observed:
-            if scale_hint is not None:
-                sep_px = self._cfg.release_separation_m * scale_hint
-            else:
-                sep_px = self._cfg.release_separation_px
-            separated = all(
-                (ball.x - wx) ** 2 + (ball.y - wy) ** 2 > sep_px * sep_px
-                for wx, wy in wrists
-            )
-            floor_ms = self._cfg.release_min_upward_speed_with_pose_ms
-        else:
-            floor_ms = self._cfg.release_min_upward_speed_ms
+        # Release rule (plan 5). The velocity-only "strong" path (2.0 m/s
+        # floor) is the backbone and pose can only briefly delay it — a
+        # confidently-wrong wrist keypoint riding the ball must never delete
+        # a real launch (veto bounded by release_separation_veto_frames).
+        # With BOTH wrists trusted, a "soft" path extends arming down to
+        # 1.2 m/s for balls separated from the hands AND above them: soft
+        # floaters arm; pump fakes (in hand) and dribble bounces (below the
+        # hands) in the 1.2-2.0 band never do. Fast >=2 m/s in-hand raises
+        # remain the documented pre-M3 residual class until M6.
         if scale_hint is not None:
-            min_up = floor_ms * scale_hint
+            strong_floor = self._cfg.release_min_upward_speed_ms * scale_hint
+            soft_floor = self._cfg.release_min_upward_speed_with_pose_ms * scale_hint
+            sep_px = self._cfg.release_separation_m * scale_hint
         else:
-            min_up = self._cfg.release_min_upward_speed_px_s
-        rising = (
-            observed
-            and not self._await_exit
-            and ball.velocity_valid
-            and separated
-            and ball.vy <= -min_up
-        )
+            strong_floor = self._cfg.release_min_upward_speed_px_s
+            soft_floor = None  # never-calibrated cold start: strong path only
+            sep_px = self._cfg.release_separation_px
+
+        rising = False
+        if observed and not self._await_exit and ball.velocity_valid:
+            separated = None
+            if wrists:
+                separated = all(
+                    (ball.x - wx) ** 2 + (ball.y - wy) ** 2 > sep_px * sep_px
+                    for wx, wy in wrists
+                )
+            if ball.vy <= -strong_floor:
+                if separated is False:
+                    self._veto_streak += 1
+                    rising = (
+                        self._veto_streak >= self._cfg.release_separation_veto_frames
+                    )
+                else:
+                    self._veto_streak = 0
+                    rising = True
+            else:
+                self._veto_streak = 0
+                if (
+                    soft_floor is not None
+                    and wrists is not None
+                    and len(wrists) == 2
+                    and separated
+                    and ball.y < min(wy for _, wy in wrists)
+                    and ball.vy <= -soft_floor
+                ):
+                    rising = True
+        else:
+            self._veto_streak = 0
         if not rising:
             self._streak = []
             return
@@ -217,6 +238,7 @@ class ShotStateMachine:
         )
         self._next_shot_id += 1
         self._streak = []
+        self._veto_streak = 0
         self._phase = ShotPhase.RISING
 
     # -------------------------------------------------------------- airborne

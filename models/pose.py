@@ -25,24 +25,31 @@ class RFDETRPoseModel:
 
     def __call__(self, frame: object) -> Optional[PoseState]:
         import cv2
-        import numpy as np
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         result = self._model.predict(rgb, threshold=self._min_conf)
-        if result is None or result.is_empty():
-            return None
-        det_conf = np.asarray(result.detection_confidence)
-        if det_conf.size == 0:  # nobody in frame; is_empty() misses this case
-            return None
-        person = int(det_conf.argmax())
-        xy = np.asarray(result.xy)
-        conf = np.asarray(result.confidence)
-        if person >= len(xy) or person >= len(conf):
-            return None
-        xy, conf = xy[person], conf[person]
-        return PoseState(
-            keypoints={
-                name: (float(x), float(y), float(c))
-                for name, (x, y), c in zip(COCO_KEYPOINTS, xy, conf)
-            }
-        )
+        return pose_from_keypoints_result(result)
+
+
+def pose_from_keypoints_result(result) -> Optional[PoseState]:
+    """Convert a supervision KeyPoints result to PoseState; None when nobody
+    is in frame. Uses ``keypoint_confidence`` (``confidence`` is a deprecated
+    alias removed in supervision 0.32)."""
+    import numpy as np
+
+    if result is None or result.is_empty():
+        return None
+    det_conf = np.asarray(result.detection_confidence)
+    if det_conf.size == 0:  # nobody in frame; is_empty() misses this case
+        return None
+    person = int(det_conf.argmax())
+    xy = np.asarray(result.xy)
+    conf = np.asarray(result.keypoint_confidence)
+    if person >= len(xy) or person >= len(conf) or len(xy[person]) < len(COCO_KEYPOINTS):
+        return None
+    return PoseState(
+        keypoints={
+            name: (float(x), float(y), float(c))
+            for name, (x, y), c in zip(COCO_KEYPOINTS, xy[person], conf[person])
+        }
+    )

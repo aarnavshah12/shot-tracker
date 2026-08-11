@@ -9,9 +9,11 @@ dependencies = [
 
 [project.optional-dependencies]
 # Video I/O + drawing (upload mode, renderer). Not needed for the pure-engine tests.
+# supervision: KeyPoints.confidence alias is removed in 0.32; pose reads
+# keypoint_confidence, but keep the ceiling until a newer range is verified.
 video = [
     "opencv-python>=4.9",
-    "supervision>=0.20",
+    "supervision>=0.29,<0.32",
 ]
 # Detector v0 runtime (M1). rfdetr (pose, M3) is a preview API — pin the
 # exact version when installed; the keypoint schema default changed to

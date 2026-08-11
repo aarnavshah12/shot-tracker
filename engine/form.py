@@ -37,16 +37,23 @@ def joint_angle_deg(a: Point, b: Point, c: Point) -> Optional[float]:
 
 
 def shooting_side(pose: PoseState, ball_xy: Point, min_conf: float) -> Optional[str]:
-    """'left' or 'right': the side whose wrist is nearest the ball."""
-    best, best_dist = None, math.inf
+    """'left' or 'right': the side whose wrist is nearest the ball.
+
+    The nearest wrist is chosen IGNORING the confidence gate, and None is
+    returned when that wrist is untrusted — silently switching to the far
+    (guide) arm would measure a confidently wrong limb (plan 4.2: null over
+    garbage). Exact ties resolve to 'left' deterministically."""
+    best_side, best_dist, best_conf = None, math.inf, 0.0
     for side in ("left", "right"):
-        wrist = _joint(pose, f"{side}_wrist", min_conf)
-        if wrist is None:
+        kp = pose.keypoints.get(f"{side}_wrist")
+        if kp is None:
             continue
-        d = math.hypot(wrist[0] - ball_xy[0], wrist[1] - ball_xy[1])
+        d = math.hypot(kp[0] - ball_xy[0], kp[1] - ball_xy[1])
         if d < best_dist:
-            best, best_dist = side, d
-    return best
+            best_side, best_dist, best_conf = side, d, kp[2]
+    if best_side is None or best_conf < min_conf:
+        return None
+    return best_side
 
 
 def release_form_metrics(
@@ -82,14 +89,17 @@ def release_form_metrics(
         out["knee_deg"] = joint_angle_deg(hip, knee, ankle)
 
     # Torso tilt: shoulder-midpoint -> hip-midpoint line vs vertical.
+    # Magnitude-only (direction needs 3D/facing info) — but shoulders must
+    # actually be ABOVE the hips: an inverted skeleton is garbage and nulls,
+    # it must not alias to a plausible small tilt.
     ls, rs = _joint(pose, "left_shoulder", min_conf), _joint(pose, "right_shoulder", min_conf)
     lh, rh = _joint(pose, "left_hip", min_conf), _joint(pose, "right_hip", min_conf)
     if ls and rs and lh and rh:
         smid = ((ls[0] + rs[0]) / 2, (ls[1] + rs[1]) / 2)
         hmid = ((lh[0] + rh[0]) / 2, (lh[1] + rh[1]) / 2)
-        dx, dy = smid[0] - hmid[0], smid[1] - hmid[1]
-        if abs(dx) > 1e-6 or abs(dy) > 1e-6:
-            out["shoulder_hip_deg"] = math.degrees(math.atan2(abs(dx), abs(dy)))
+        dx, up = smid[0] - hmid[0], hmid[1] - smid[1]  # up > 0: shoulders above hips
+        if up > 1e-6:
+            out["shoulder_hip_deg"] = math.degrees(math.atan2(abs(dx), up))
 
     # Release height: ball above the shooter's grounded foot (lower ankle,
     # i.e. larger y). Approximate ground reference; noted in PROGRESS.

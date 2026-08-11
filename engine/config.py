@@ -62,6 +62,11 @@ class EngineConfig:
     release_separation_m: float = 0.35
     release_separation_px: float = 60.0  # pre-calibration fallback
     release_min_upward_speed_with_pose_ms: float = 1.2
+    # A wrist keypoint confidently stuck ON the ball must not veto a real
+    # launch forever: a separation veto that persists this many consecutive
+    # strong-rise frames is overridden (real ball-in-hand raises at >=2 m/s
+    # don't sustain that long; a tracked flight does).
+    release_separation_veto_frames: int = 8
     # Pre-calibration fallback. 400 px/s sits at 1.8-2.9 m/s across the
     # scales measured on real sessions (140-220 px/m) — close to the m/s
     # floor instead of the far-too-permissive 200. The calibration hint

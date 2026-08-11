@@ -47,14 +47,21 @@ class ShotEngine:
         self._dt_estimate = 1.0 / 30.0
         self._finalized = False
         self._last_pose: Optional[PoseState] = None
-        # Recent (frame_index, pose, ball_xy) for release-frame form metrics:
-        # a shot arms release_consecutive_frames after its release frame, so a
-        # short ring suffices.
+        self._pose_stale = False
+        self.pose_errors = 0  # pose-model exceptions swallowed (degraded frames)
+        # Recent (frame_index, evaluated_pose_or_None, ball_xy) for
+        # release-frame form metrics: a shot arms release_consecutive_frames
+        # after its release frame, so a short ring suffices. Only poses
+        # actually evaluated on that frame are stored — a carried-forward
+        # copy must not masquerade as the release-frame skeleton.
         self._recent: deque[tuple[int, Optional[PoseState], Optional[tuple[float, float]]]] = (
             deque(maxlen=8)
         )
-        self._release_stash: dict[int, tuple[Optional[PoseState], Optional[tuple[float, float]]]] = {}
-        self._stashed_shot: Optional[int] = None
+        # Keyed by shot_id -> (release_frame, pose, ball_xy). release_frame is
+        # validated at fill time: shot ids are reused after discards, so the
+        # id alone must never be trusted.
+        self._release_stash: dict[int, tuple[int, Optional[PoseState], Optional[tuple[float, float]]]] = {}
+        self._stashed_key: Optional[tuple[int, int]] = None  # (shot_id, release_frame)
 
     @property
     def calibration(self) -> ScaleCalibration:
@@ -100,11 +107,11 @@ class ShotEngine:
         elif self._trail:
             self._trail.clear()
 
-        pose = self._update_pose(frame)
+        pose, evaluated = self._update_pose(frame)
         wrists = form.confident_wrists(pose, self.config.pose.keypoint_confidence)
 
         ball_xy = (ball.x, ball.y) if ball is not None and not ball.interpolated else None
-        self._recent.append((self._frame_index, pose, ball_xy))
+        self._recent.append((self._frame_index, pose if evaluated else None, ball_xy))
 
         px_per_m = self._calibration.px_per_m
         event = self._machine.update(
@@ -112,7 +119,7 @@ class ShotEngine:
             px_per_m_hint=self._calibration.px_per_m_hint,
             wrists=wrists,
         )
-        self._stash_release_context()
+        self._sync_release_stash(event)
         if event is not None:
             self._fill_form_metrics(event, px_per_m)
 
@@ -123,6 +130,7 @@ class ShotEngine:
             ball=ball,
             rim=rim,
             pose=pose,
+            pose_stale=self._pose_stale,
             trail=list(self._trail),
             events=[event] if event else [],
             active_shot_id=self._machine.active_shot_id,
@@ -131,32 +139,58 @@ class ShotEngine:
             current_speed_ms=self._speed_ms(ball, px_per_m),
         )
 
-    def _update_pose(self, frame: object) -> Optional[PoseState]:
+    def _update_pose(self, frame: object) -> tuple[Optional[PoseState], bool]:
+        """Returns (pose, evaluated_this_frame). Pose failures degrade to
+        'no pose this frame' — pose is auxiliary by contract and one bad
+        frame must never abort make/miss tracking."""
         if self._pose_model is None or not self.config.pose.enabled:
-            return None
+            return None, False
         n = max(1, self.config.pose.every_n_frames)
         if self._frame_index % n == 0:
-            self._last_pose = self._pose_model(frame)
-        return self._last_pose  # carried forward on skipped frames (M5 cadence)
+            try:
+                self._last_pose = self._pose_model(frame)
+            except Exception:
+                self.pose_errors += 1
+                self._last_pose = None
+            self._pose_stale = False
+            return self._last_pose, True
+        self._pose_stale = self._last_pose is not None
+        return self._last_pose, False  # carried forward (M5 cadence), flagged stale
 
-    def _stash_release_context(self) -> None:
-        """When a shot arms, remember the pose + ball position at its release
-        frame so form metrics can be computed at resolution time."""
+    def _sync_release_stash(self, event: Optional[ShotEvent]) -> None:
+        """Track the machine's active shot: stash the release-frame context
+        when a shot arms; drop it when the candidate is discarded. Shot ids
+        are reused after discards, so the stash is keyed and validated by
+        (shot_id, release_frame)."""
         shot_id = self._machine.active_shot_id
-        if shot_id is None or shot_id == self._stashed_shot:
+        if shot_id is None:
+            if event is None and self._stashed_key is not None:
+                # Candidate discarded without an event: its context is trash.
+                self._release_stash.pop(self._stashed_key[0], None)
+            self._stashed_key = None
             return
-        self._stashed_shot = shot_id
         release_frame = self._machine.active_release_frame
-        best = None
-        for f, pose, ball_xy in self._recent:
-            if abs(f - release_frame) <= 2 and (best is None or abs(f - release_frame) < best[0]):
-                best = (abs(f - release_frame), pose, ball_xy)
-        self._release_stash[shot_id] = (best[1], best[2]) if best else (None, None)
+        if (shot_id, release_frame) == self._stashed_key:
+            return
+        self._stashed_key = (shot_id, release_frame)
+        ball_xy = None
+        pose_best: tuple[int, Optional[PoseState]] = (99, None)
+        for f, pose, bxy in self._recent:
+            d = abs(f - release_frame)
+            if d == 0:
+                ball_xy = bxy
+            if d <= 2 and pose is not None and d < pose_best[0]:
+                pose_best = (d, pose)  # nearest EVALUATED pose to the release
+        self._release_stash[shot_id] = (release_frame, pose_best[1], ball_xy)
         while len(self._release_stash) > 4:
             self._release_stash.pop(next(iter(self._release_stash)))
 
     def _fill_form_metrics(self, event: ShotEvent, px_per_m: Optional[float]) -> None:
-        pose, ball_xy = self._release_stash.pop(event.shot_id, (None, None))
+        release_frame, pose, ball_xy = self._release_stash.pop(
+            event.shot_id, (None, None, None)
+        )
+        if release_frame != event.frames[0]:
+            pose, ball_xy = None, None  # stale/foreign stash: null over garbage
         metrics = form.release_form_metrics(
             pose, ball_xy, px_per_m, self.config.pose.keypoint_confidence
         )
@@ -164,6 +198,8 @@ class ShotEngine:
         event.knee_deg = metrics["knee_deg"]
         event.shoulder_hip_deg = metrics["shoulder_hip_deg"]
         event.release_height_m = metrics["release_height_m"]
+        if self._stashed_key is not None and self._stashed_key[0] == event.shot_id:
+            self._stashed_key = None
 
     def finalize(self) -> list[ShotEvent]:
         """The stream ended. A shot still open at end-of-stream is a real

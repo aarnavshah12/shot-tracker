@@ -118,8 +118,10 @@ class ShotEvent:
             "elbow_deg": _round(self.elbow_deg),
             "knee_deg": _round(self.knee_deg),
             "shoulder_hip_deg": _round(self.shoulder_hip_deg),
-            "release_height_m": _round(self.release_height_m),
-            "court_pos_m": list(self.court_pos_m) if self.court_pos_m else None,
+            "release_height_m": _round(self.release_height_m, 2),
+            "court_pos_m": (
+                [round(v, 2) for v in self.court_pos_m] if self.court_pos_m else None
+            ),
             "frames": list(self.frames),
         }
 
@@ -139,6 +141,7 @@ class FrameState:
     ball: Optional[BallTrack] = None
     rim: Optional[Detection] = None
     pose: Optional[PoseState] = None
+    pose_stale: bool = False  # carried forward from an earlier frame (live cadence)
     trail: list[tuple[float, float]] = field(default_factory=list)  # last ~20 centroids
     events: list[ShotEvent] = field(default_factory=list)  # shots resolved on this frame
     active_shot_id: Optional[int] = None

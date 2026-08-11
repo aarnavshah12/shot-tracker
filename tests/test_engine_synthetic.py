@@ -554,16 +554,16 @@ def full_pose(wrist: tuple[float, float], conf: float = 0.9):
 
 
 def test_wrist_rule_blocks_pump_fake():
-    """Ball raised to rim height and lowered, wrists riding with it the whole
-    time: with pose, the separation rule means this can never arm — the
-    pre-M3 phantom clean-miss is gone."""
+    """Ball raised toward the rim in the 1.2-2.0 m/s band with the wrists
+    riding it: the soft path requires separation, so this can never arm.
+    (Raises >= 2 m/s remain the documented pre-M3 residual class.)"""
     positions = {i: (950.0, 600.0) for i in range(10)}
-    for i in range(10, 31):
-        positions[i] = (950.0, 600.0 - 12.0 * (i - 10))  # 720 px/s raise
-    for i in range(31, 40):
-        positions[i] = (950.0, 348.0)  # held at rim height
-    for i in range(40, 55):
-        positions[i] = (950.0, 348.0 + 15.0 * (i - 40))  # lowered
+    for i in range(10, 54):
+        positions[i] = (950.0, 600.0 - 5.8 * (i - 10))  # 348 px/s ~ 1.6 m/s
+    for i in range(54, 60):
+        positions[i] = (950.0, 344.8)  # held at rim height
+    for i in range(60, 75):
+        positions[i] = (950.0, 344.8 + 12.0 * (i - 60))  # lowered
 
     def pose_model(frame_index):
         pos = positions.get(frame_index)
@@ -577,6 +577,172 @@ def test_wrist_rule_blocks_pump_fake():
     states = [engine.process_frame(i, i / FPS) for i in range(max(positions) + 6)]
     assert events_of(states) == []
     assert all(s.phase is ShotPhase.IDLE for s in states)
+
+
+def test_soft_path_needs_both_wrists_and_ball_above_hands():
+    """The lowered 1.2 m/s floor is a pose-gated extension: it arms a slow
+    separated launch above the hands, but never a dribble bounce below them,
+    and never with only one trusted wrist."""
+    # Slow launch: ball leaves the hands upward at ~330 px/s (1.5 m/s),
+    # drifting away from both wrists.
+    launch = {i: (700.0, 900.0) for i in range(10)}
+    for i in range(10, 31):
+        launch[i] = (700.0 + 4.0 * (i - 10), 900.0 - 5.5 * (i - 10))
+
+    def run_with(pose_fn, positions):
+        engine = ShotEngine(
+            EngineConfig.upload(),
+            detector=scripted_detector(positions),
+            pose_model=pose_fn,
+        )
+        return [engine.process_frame(i, i / FPS) for i in range(max(positions) + 1)]
+
+    # Both wrists trusted, hands stay put below the departing ball: arms.
+    states = run_with(lambda f: full_pose((700.0, 940.0)), launch)
+    assert any(s.phase is ShotPhase.RISING for s in states)
+    # No pose: 330 px/s sits under the 2.0 m/s velocity-only floor: no arm.
+    states = run_with(None, launch)
+    assert all(s.phase is ShotPhase.IDLE for s in states)
+    # One trusted wrist only: soft path refused (the ball-holding wrist may
+    # be the untrusted one) — no arm.
+    def one_wrist(frame_index):
+        p = full_pose((700.0, 940.0))
+        kp = dict(p.keypoints)
+        x, y, _ = kp["right_wrist"]
+        kp["right_wrist"] = (x, y, 0.2)
+        return type(p)(keypoints=kp)
+    states = run_with(one_wrist, launch)
+    assert all(s.phase is ShotPhase.IDLE for s in states)
+    # Dribble bounce BELOW the hands at the same speed: no arm.
+    bounce = {i: (700.0, 980.0) for i in range(5)}
+    for i in range(5, 17):
+        bounce[i] = (700.0, 980.0 - 5.5 * (i - 5))  # rises to y~914, hands at 890
+    states = run_with(lambda f: full_pose((690.0, 700.0)), bounce)
+    assert all(s.phase is ShotPhase.IDLE for s in states)
+
+
+def test_sticky_wrist_cannot_delete_a_real_make():
+    """A wrist keypoint confidently stuck ON the ball vetoes separation
+    forever; the bounded veto override must still arm the launch and the
+    make must be logged (with a late release anchor, not silence)."""
+    positions = make_shot_positions()
+
+    def pose_model(frame_index):
+        pos = positions.get(frame_index)
+        return full_pose(pos) if pos else full_pose((700.0, 900.0))
+
+    engine = ShotEngine(
+        EngineConfig.upload(),
+        detector=scripted_detector(positions),
+        pose_model=pose_model,
+    )
+    states = [engine.process_frame(i, i / FPS) for i in range(max(positions) + 6)]
+    events = events_of(states)
+    assert len(events) == 1
+    assert events[0].verdict is Verdict.MAKE
+    assert events[0].frames[0] >= 11  # anchored late by the veto, not lost
+
+
+def test_discarded_candidate_does_not_poison_next_shots_form_metrics():
+    """A windup that arms and discards leaves no stash behind: the next real
+    shot's form metrics come from ITS release frame — here pose is absent at
+    the real release, so they must be null, never the windup's numbers."""
+    positions = {i: (700.0, 900.0) for i in range(10)}
+    for i in range(10, 35):
+        positions[i] = (700.0, 900.0 - 12.0 * (i - 10))  # windup: arms, no rim
+    for i in range(35, 60):
+        positions[i] = (700.0, 600.0 + 12.0 * (i - 35))  # falls back: discard
+    for i in range(60, 70):
+        positions[i] = (700.0, 900.0)
+    positions |= arc_positions(70, 708.0, apex_x=870.0, apex_y=150.0, last_x=1000.0)
+
+    def pose_model(frame_index):
+        # Pose exists only during the windup; absent for the real shot.
+        return full_pose((660.0, 890.0)) if frame_index < 40 else None
+
+    engine = ShotEngine(
+        EngineConfig.upload(),
+        detector=scripted_detector(positions),
+        pose_model=pose_model,
+    )
+    states = [engine.process_frame(i, i / FPS) for i in range(max(positions) + 6)]
+    events = events_of(states)
+    assert len(events) == 1
+    assert events[0].verdict is Verdict.MAKE
+    assert events[0].elbow_deg is None  # not the windup's stashed skeleton
+    assert events[0].knee_deg is None
+    assert events[0].release_height_m is None
+
+
+def test_shooting_side_never_switches_to_guide_arm():
+    """Ball nearest an UNTRUSTED wrist: metrics null rather than measuring
+    the confident guide arm."""
+    from engine import form
+
+    p = full_pose((710.0, 700.0))
+    kp = dict(p.keypoints)
+    kp["right_wrist"] = (710.0, 700.0, 0.3)  # nearest the ball, untrusted
+    kp["left_wrist"] = (400.0, 700.0, 0.9)  # far guide hand, trusted
+    pose = type(p)(keypoints=kp)
+    assert form.shooting_side(pose, (700.0, 700.0), 0.5) is None
+    metrics = form.release_form_metrics(pose, (700.0, 700.0), 200.0, 0.5)
+    assert all(v is None for v in metrics.values())
+
+
+def test_inverted_pose_nulls_torso_tilt():
+    from engine import form
+
+    p = full_pose((700.0, 900.0))
+    kp = dict(p.keypoints)
+    for side in ("left", "right"):  # shoulders below hips: garbage skeleton
+        sx, sy, sc = kp[f"{side}_shoulder"]
+        hx, hy, hc = kp[f"{side}_hip"]
+        kp[f"{side}_shoulder"] = (sx, hy + 100.0, sc)
+    pose = type(p)(keypoints=kp)
+    metrics = form.release_form_metrics(pose, (700.0, 900.0), 200.0, 0.5)
+    assert metrics["shoulder_hip_deg"] is None
+
+
+def test_pose_adapter_result_parsing():
+    """The adapter's extraction logic, on faked supervision results."""
+    import numpy as np
+
+    from models.pose import pose_from_keypoints_result
+    from models.registry import COCO_KEYPOINTS
+
+    class Fake:
+        def __init__(self, n):
+            self.xy = np.zeros((n, 17, 2)) + [[100.0, 200.0]] * 17
+            self.keypoint_confidence = np.full((n, 17), 0.9)
+            self.detection_confidence = np.linspace(0.5, 0.9, n) if n else np.array([])
+
+        def is_empty(self):
+            return False  # mimics the observed nobody-in-frame quirk
+
+    assert pose_from_keypoints_result(None) is None
+    assert pose_from_keypoints_result(Fake(0)) is None  # empty slips is_empty
+    pose = pose_from_keypoints_result(Fake(3))  # picks the argmax person
+    assert pose is not None and set(pose.keypoints) == set(COCO_KEYPOINTS)
+    assert pose.keypoints["left_wrist"] == (100.0, 200.0, pytest.approx(0.9))
+
+
+def test_pose_model_exception_degrades_not_aborts():
+    positions = make_shot_positions()
+
+    def flaky_pose(frame_index):
+        if frame_index == 20:
+            raise RuntimeError("decoder hiccup")
+        return full_pose((700.0, 900.0))
+
+    engine = ShotEngine(
+        EngineConfig.upload(),
+        detector=scripted_detector(positions),
+        pose_model=flaky_pose,
+    )
+    states = [engine.process_frame(i, i / FPS) for i in range(max(positions) + 6)]
+    events = events_of(states)
+    assert len(events) == 1 and events[0].verdict is Verdict.MAKE
+    assert engine.pose_errors == 1
 
 
 def test_wrist_separation_arms_release_and_fills_form_metrics():
@@ -681,6 +847,7 @@ def test_modes_differ_only_in_model_size_config():
         "release_consecutive_frames", "release_min_upward_speed_ms",
         "release_min_upward_speed_px_s", "release_separation_m",
         "release_separation_px", "release_min_upward_speed_with_pose_ms",
+        "release_separation_veto_frames",
         "rim_neighborhood_scale", "occlusion_frames_for_make",
         "crossing_bridge_max_frames",
         "occlusion_hold_frames", "span_tolerance_frac", "max_shot_seconds",
