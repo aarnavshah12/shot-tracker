@@ -1,0 +1,25 @@
+# Agent-local files — never push these (AGENTS.md rule)
+.claude/
+AGENTS.md
+shot-tracker-agent-plan.md
+
+# Secrets
+.env
+.env.*
+
+# Per-session outputs
+sessions/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# OS
+.DS_Store
