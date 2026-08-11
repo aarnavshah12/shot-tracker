@@ -195,10 +195,11 @@ def test_make_through_occlusion_reappears_below():
 def test_crossing_hidden_in_detection_gap_still_makes():
     """The net occludes the ball exactly at the rim-top crossing (both missed
     makes of session-2026-08-11): last observed just above the rim in-span,
-    one dark frame, reappears inside the cylinder, then observed below —
-    make, flagged occluded."""
+    a dark frame, reappears INSIDE the cylinder (strictly in-span, between
+    rim top and bottom — the bridge's required reappearance zone), then
+    observed below — make, flagged occluded."""
     positions = make_shot_positions()
-    del positions[40]  # the crossing frame goes dark
+    del positions[39]  # the frame before the crossing goes dark
     states = run(positions)
 
     events = events_of(states)
@@ -207,6 +208,55 @@ def test_crossing_hidden_in_detection_gap_still_makes():
     assert e.verdict is Verdict.MAKE
     assert e.verdict_confidence is VerdictConfidence.OCCLUDED
     assert e.frames == (10, 41)
+
+
+def test_behind_rim_airball_cannot_bridge_a_crossing():
+    """Ball vanishes above the rim and reappears BELOW the cylinder (ground
+    behind the hoop, free-fall continuation): the bridge must refuse — the
+    reappearance is not inside the cylinder — and the shot is a miss."""
+    positions = {i: (700.0, 900.0) for i in range(10)}
+    positions |= arc_positions(10, 708.0, apex_x=870.0, apex_y=150.0, last_x=940.0)
+    last = max(positions)  # x=940, y~277: above rim top, in-span
+    # Dark 3 frames, reappears below the rim bottom continuing its arc.
+    x = 940.0 + 8.0 * 4
+    positions[last + 4] = (x, parabola(x, 870.0, 150.0))  # y ~ 379: below cylinder
+    for k in range(5, 9):  # keeps falling away
+        x = 940.0 + 8.0 * k
+        positions[last + k] = (x, parabola(x, 870.0, 150.0))
+    states = run(positions)
+
+    events = events_of(states)
+    assert len(events) == 1
+    assert events[0].verdict is Verdict.MISS
+    assert events[0].entry_angle_deg is None  # no crossing was ever registered
+
+
+def test_floater_over_neighborhood_ceiling_still_scores():
+    """A steep arc pokes above the rim neighborhood's ceiling mid-flight.
+    Exiting through the TOP must not resolve (the ball is still inbound);
+    it falls back through the rim and scores."""
+    positions = {i: (750.0, 900.0) for i in range(5)}
+    a = 760.0 / (750.0 - 930.0) ** 2  # apex (930, 140), continuous with idle spot
+    i, x = 5, 758.0
+    while x <= 1030.0:
+        positions[i] = (x, a * (x - 930.0) ** 2 + 140.0)
+        i, x = i + 1, x + 8.0
+    states = run(positions)
+
+    events = events_of(states)
+    assert len(events) == 1
+    assert events[0].verdict is Verdict.MAKE
+    assert states[-1].phase is ShotPhase.IDLE
+
+
+def test_process_frame_after_finalize_raises():
+    positions = {i: (700.0, 900.0) for i in range(5)}
+    engine = ShotEngine(EngineConfig.upload(), detector=scripted_detector(positions))
+    for i in range(5):
+        engine.process_frame(i, i / FPS)
+    engine.finalize()
+    with pytest.raises(RuntimeError):
+        engine.process_frame(5, 5 / FPS)
 
 
 def test_make_survives_midflight_detection_gap():
@@ -368,7 +418,7 @@ def test_false_positive_drizzle_cannot_wedge_the_machine():
     resolves at the max_shot_seconds cap and the machine returns to IDLE."""
     positions = {i: (700.0, 900.0) for i in range(5)}
     positions |= arc_positions(5, 708.0, apex_x=870.0, apex_y=150.0, last_x=852.0)
-    for i in range(40, 401, 20):
+    for i in range(40, 641, 20):
         positions[i] = (940.0, 260.0)  # static near-net false positive
     states = run(positions, extra=30)
 

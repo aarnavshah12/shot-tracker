@@ -44,12 +44,18 @@ class ShotEngine:
         self._trail: deque[tuple[float, float]] = deque(maxlen=config.trail_length)
         self._last_t = 0.0
         self._dt_estimate = 1.0 / 30.0
+        self._finalized = False
 
     @property
     def calibration(self) -> ScaleCalibration:
         return self._calibration
 
     def process_frame(self, frame: object, t: float) -> FrameState:
+        if self._finalized:
+            raise RuntimeError(
+                "process_frame after finalize(): the engine's frame clock has "
+                "advanced past end-of-stream; use a fresh ShotEngine per source"
+            )
         self._frame_index += 1
         if t > self._last_t:
             self._dt_estimate = t - self._last_t
@@ -85,7 +91,10 @@ class ShotEngine:
             self._trail.clear()
 
         px_per_m = self._calibration.px_per_m
-        event = self._machine.update(ball, rim_box, self._frame_index, t, px_per_m)
+        event = self._machine.update(
+            ball, rim_box, self._frame_index, t, px_per_m,
+            px_per_m_hint=self._calibration.px_per_m_hint,
+        )
 
         pose = self._pose_model(frame) if self._pose_model and self.config.pose.enabled else None
 
@@ -111,6 +120,7 @@ class ShotEngine:
         footage routinely cuts right at the outcome, so without this flush
         those attempts would silently vanish.
         """
+        self._finalized = True
         events: list[ShotEvent] = []
         rim_box = self._calibration.median_rim_box
         px_per_m = self._calibration.px_per_m

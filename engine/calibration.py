@@ -41,6 +41,7 @@ class ScaleCalibration:
         self._widths: list[float] = []
         self._boxes: list[Box] = []
         self._drift_run = 0
+        self._last_px_per_m: Optional[float] = None
 
     def observe_rim(self, rim: Detection) -> None:
         if rim.width <= 0:
@@ -68,7 +69,18 @@ class ScaleCalibration:
         """Pixels per meter, or None until enough rim samples exist."""
         if len(self._widths) < self._min_samples:
             return None
-        return statistics.median(self._widths) / self._rim_diameter_m
+        value = statistics.median(self._widths) / self._rim_diameter_m
+        self._last_px_per_m = value
+        return value
+
+    @property
+    def px_per_m_hint(self) -> Optional[float]:
+        """Best available scale for *thresholds*: the live value, else the
+        last one known before a drift reset. Metrics must keep using the
+        strict ``px_per_m`` (None -> null, never stale numbers); thresholds
+        prefer a slightly stale scale over a resolution-blind px constant."""
+        live = self.px_per_m
+        return live if live is not None else self._last_px_per_m
 
     @property
     def median_rim_box(self) -> Optional[Box]:
