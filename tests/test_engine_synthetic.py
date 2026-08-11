@@ -192,6 +192,23 @@ def test_make_through_occlusion_reappears_below():
     assert states[-1].phase is ShotPhase.IDLE
 
 
+def test_crossing_hidden_in_detection_gap_still_makes():
+    """The net occludes the ball exactly at the rim-top crossing (both missed
+    makes of session-2026-08-11): last observed just above the rim in-span,
+    one dark frame, reappears inside the cylinder, then observed below —
+    make, flagged occluded."""
+    positions = make_shot_positions()
+    del positions[40]  # the crossing frame goes dark
+    states = run(positions)
+
+    events = events_of(states)
+    assert len(events) == 1
+    e = events[0]
+    assert e.verdict is Verdict.MAKE
+    assert e.verdict_confidence is VerdictConfidence.OCCLUDED
+    assert e.frames == (10, 41)
+
+
 def test_make_survives_midflight_detection_gap():
     """Two dark frames on the way up (motion blur): still one clean make."""
     positions = make_shot_positions()
@@ -513,6 +530,7 @@ def test_modes_differ_only_in_model_size_config():
         "release_consecutive_frames", "release_min_upward_speed_ms",
         "release_min_upward_speed_px_s",
         "rim_neighborhood_scale", "occlusion_frames_for_make",
+        "crossing_bridge_max_frames",
         "occlusion_hold_frames", "span_tolerance_frac", "max_shot_seconds",
         "rattle_pop_max_rim_widths", "rim_diameter_m", "calibration_frames",
         "calibration_min_samples", "calibration_drift_frames",

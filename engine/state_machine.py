@@ -76,6 +76,8 @@ class _ActiveShot:
     crossed: bool = False
     crossing_frame: Optional[int] = None
     crossing_x: Optional[float] = None
+    crossing_occluded: bool = False  # the crossing hid inside a detection gap
+    last_observed: Optional[metrics.Sample] = None
     popped_out: bool = False  # observed above the rim top after crossing
     recrossed_after_pop: bool = False
     post_cross_unobserved: int = 0  # unobserved frames since the crossing
@@ -168,6 +170,7 @@ class ShotStateMachine:
             release_y=release[3],
             samples=list(self._streak),
             min_observed_y=min(s[3] for s in self._streak),
+            last_observed=self._streak[-1],
         )
         self._next_shot_id += 1
         self._streak = []
@@ -201,10 +204,10 @@ class ShotStateMachine:
             return self._resolve_ended(rim_box, frame_index, px_per_m)
         shot.unseen_streak = 0
 
-        prev = shot.samples[-1] if shot.samples else None
+        prev_obs = shot.last_observed
         self._record(ball, rim_box, frame_index, t)
         if rim_box is not None:
-            self._detect_crossing(prev, ball, rim_box, frame_index)
+            self._detect_crossing(prev_obs, ball, rim_box, frame_index)
 
         if self._phase is ShotPhase.RISING:
             if shot.crossed:
@@ -244,31 +247,42 @@ class ShotStateMachine:
 
     def _detect_crossing(
         self,
-        prev: Optional[metrics.Sample],
+        prev_obs: Optional[metrics.Sample],
         ball: BallTrack,
         rim_box: Box,
         frame_index: int,
     ) -> None:
         """Register a downward rim-top crossing within the horizontal span.
 
-        Only an observed, consecutive-frame segment counts. Tracker ghosts and
-        gap-spanning lines would let a ball that was never seen over the
-        cylinder "cross" — exactly the behind-the-rim airball plan 12 warns
-        about — so they never do.
+        Both endpoints must be *observed* — tracker ghosts never cross. A
+        consecutive-frame segment always qualifies; a segment bridging a short
+        detection gap qualifies only when both endpoints hug the rim (last
+        seen just above it, reappearing inside/just under the cylinder). The
+        net occludes the ball exactly at the crossing on real 30 fps footage
+        (both missed makes of session-2026-08-11), but a behind-the-rim
+        airball that vanishes and reappears on the ground far below must
+        still never fabricate a crossing (plan 12).
         """
         shot = self._shot
-        if prev is None or ball.interpolated:
+        if prev_obs is None or ball.interpolated:
             return
-        prev_frame, _, prev_x, prev_y, prev_interp = prev
-        if prev_interp or frame_index - prev_frame != 1:
+        po_frame, _, po_x, po_y, _ = prev_obs
+        gap = frame_index - po_frame
+        if gap < 1 or gap > self._cfg.crossing_bridge_max_frames:
             return
-        if ball.y <= prev_y:
+        if ball.y <= po_y:
             return
-        rim_x1, rim_top, rim_x2, _ = rim_box
-        if not (prev_y < rim_top <= ball.y):
+        rim_x1, rim_top, rim_x2, rim_bottom = rim_box
+        if not (po_y < rim_top <= ball.y):
             return
-        frac = (rim_top - prev_y) / (ball.y - prev_y)
-        x_cross = prev_x + (ball.x - prev_x) * frac
+        if gap > 1:
+            rim_h = rim_bottom - rim_top
+            if po_y < rim_top - 2 * rim_h:
+                return  # last seen too far above the rim to bridge
+            if ball.y > rim_bottom + rim_h:
+                return  # reappeared too far below the rim to bridge
+        frac = (rim_top - po_y) / (ball.y - po_y)
+        x_cross = po_x + (ball.x - po_x) * frac
         if not (rim_x1 <= x_cross <= rim_x2):
             return
         if shot.crossed:
@@ -279,6 +293,7 @@ class ShotStateMachine:
             shot.crossed = True
             shot.crossing_frame = frame_index
             shot.crossing_x = x_cross
+            shot.crossing_occluded = gap > 1
 
     def _check_after_crossing(
         self, ball: BallTrack, rim_box: Box, frame_index: int, px_per_m: Optional[float]
@@ -293,7 +308,10 @@ class ShotStateMachine:
         rim_width = rim_x2 - rim_x1
         tol = self._cfg.span_tolerance_frac * rim_width
         near_span = (rim_x1 - tol) <= ball.x <= (rim_x2 + tol)
-        occluded = shot.post_cross_unobserved >= self._cfg.occlusion_frames_for_make
+        occluded = (
+            shot.crossing_occluded
+            or shot.post_cross_unobserved >= self._cfg.occlusion_frames_for_make
+        )
 
         if ball.y > rim_bottom:
             if near_span and not (shot.popped_out and not shot.recrossed_after_pop):
@@ -380,6 +398,7 @@ class ShotStateMachine:
         else:
             shot.last_gap = shot._nonobserved_run
             shot._nonobserved_run = 0
+            shot.last_observed = shot.samples[-1]
             if shot.min_observed_y is None or ball.y < shot.min_observed_y:
                 shot.min_observed_y = ball.y
         if rim_box is not None and self._in_neighborhood(ball, rim_box):

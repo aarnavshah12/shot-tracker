@@ -46,15 +46,18 @@ class EngineConfig:
     # frames. The threshold lives in m/s (via calibrated scale) so raising the
     # ball into the shot pocket (~1-2 m/s) doesn't arm a release the way a
     # real launch (~7 m/s) does; the px value is the pre-calibration fallback.
-    # (2.5, not higher: at 30 fps, motion blur plus EMA smoothing measures a
-    # real ~5 m/s launch as low as ~2.7 m/s — seen on session-2026-08-11.)
+    # (2.0: at 30 fps, motion blur plus EMA smoothing measured a real soft
+    # launch at 2.2-2.7 m/s on session-2026-08-11 (IMG_7103). Windups reach
+    # 2.0-3.6 m/s, so some arm early — that skews release *metrics*, never
+    # verdicts, and M3's wrist-separation rule is the designed fix.)
     release_consecutive_frames: int = 3
-    release_min_upward_speed_ms: float = 2.5
+    release_min_upward_speed_ms: float = 2.0
     release_min_upward_speed_px_s: float = 200.0
 
     # Shot state machine / make-miss (plan 6.2, 6.3)
     rim_neighborhood_scale: float = 3.0  # rim box expanded by this factor = "rim neighborhood"
     occlusion_frames_for_make: int = 2  # occluded >= this after crossing, reappears below -> make
+    crossing_bridge_max_frames: int = 4  # rim-top crossing may hide in a gap this long
     occlusion_hold_frames: int = 30  # track lost mid-shot: wait this long for reappearance
     span_tolerance_frac: float = 0.25  # lateral slack (x rim width) on the reappears-below check
     max_shot_seconds: float = 6.0  # hard cap on one attempt; kills any wedged hold
