@@ -135,8 +135,34 @@ initially failed drove real fixes:
 Caveats, recorded honestly: the 23 clips served as both tuning set and eval
 set (the plan's fresh-clip design avoids this); the session is 30 fps where
 the plan asked for 60; and n=23 < 50. M6's re-eval (≥48/50 equivalent) should
-use fresh footage. Adversarial verification round on the M1/M2-era engine
-changes launched before closing the milestone.
+use fresh footage.
+
+**Verification round on the M1/M2 changes: 12 findings, all addressed or
+documented** (11 sim-backed scenarios now match ground truth):
+
+- Bridged crossings tightened: reappearance must be strictly in-span, either
+  INSIDE the cylinder (immediate accept — both real occluded makes) or in
+  the net-exit zone one rim-width below it, where the verdict comes from the
+  next observed frame's fall speed vs quadratic ballistic continuation
+  (10–90% of ballistic = net drag → make; ~100% = behind-rim airball →
+  reject; ~0% = adopted resting ball → reject). Re-crosses after a pop-out
+  are never bridged. Windows denominate in rim width, never the flappy box
+  height; verdicts are now aspect-ratio-stable.
+- Uncrossed exits resolve only at/below rim level — steep floaters poking
+  above the rim-neighborhood ceiling stay live and score when they drop in.
+- Shot clock: 10 s, checked after each frame's evidence (a make observed on
+  the cap frame wins; free-throw routines with early windup arms no longer
+  time out mid-flight).
+- The machine remembers the last rim geometry across detector dropouts and
+  calibration resets (kills phantom events from rim-box-None resolutions);
+  the release threshold uses a last-known-scale hint through resets, and the
+  never-calibrated px fallback rose 200 → 400 px/s.
+- Exit-miss confidence honors long gaps near the rim (occluded, not clean);
+  process_frame after finalize() raises instead of silently skewing clocks.
+- **Documented, not fixed (M3 dependency)**: a ball raised to rim height and
+  lowered (pump fake under the hoop) can log a phantom clean-miss attempt —
+  ball-only 2D cannot distinguish it from a soft floater; the wrist-
+  separation release rule at M3 is the designed fix.
 
 ## Log
 
