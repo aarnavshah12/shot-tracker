@@ -10,7 +10,7 @@ Driveway shot tracker build log. Milestones M0–M6 per the build plan.
 | M1 Detector v0 integration | **done** 2026-08-11 | ball-in-flight 98.1% (target 90) PASS; rim IoU gap logged as M6 fine-tune input |
 | M2 Shot logic | **done** 2026-08-11 — 23/23 after verification-round fixes | owner substituted 23 labeled clips for the 50-shot clip; caveats in M2 summary |
 | M3 Pose | **done** 2026-08-11 — form on 23/23 shots (target 80%), scorecard held 23/23 after verification fixes | zero-shot RF-DETR Keypoint, rfdetr==1.9.2 pinned |
-| M4 Renderer | not started | reference layout documented from owner's screenshots |
+| M4 Renderer | built 2026-08-11, demo set delivered — **awaiting owner sign-off** | 4 demo mp4s in sessions/demo/; homography click tool ready |
 | M5 Modes | not started | |
 | M6 Precision + polish | not started | fine-tune inputs logged below |
 
@@ -214,3 +214,13 @@ COCO-17 ordering verified by drawing indexed keypoints on real footage).
   (>=2 m/s) in-hand raises can still arm (pre-M3 parity; discarded as noise
   or resolved on the real outcome). **M3 closed: form 23/23, scorecard
   23/23.** Next: M4 renderer.
+
+- **2026-08-11 (late)** — M4 renderer built: 1920x1080 split screen per the
+  reference (video pane with skeleton/ball/trail/rim/tag overlays and frame
+  counter; SHOT SPEED, BALL DISTANCE TO RIM, MAKE? panels in cream/orange
+  with Menlo numerals; Pose at Release inset; signed L/R joint-angle table).
+  h264/yuv420p with source audio muxed (bundled ffmpeg). Demo set rendered
+  (7101, 7097, 7090, 7103 -> sessions/demo/). Homography click tool shipped
+  (scripts/click_homography.py). 40 tests green. Awaiting owner sign-off =
+  the M4 acceptance gate. Display units: km/h to match the reference look
+  (jsonl stays m/s per plan 7).
