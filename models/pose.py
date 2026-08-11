@@ -31,9 +31,15 @@ class RFDETRPoseModel:
         result = self._model.predict(rgb, threshold=self._min_conf)
         if result is None or result.is_empty():
             return None
-        person = int(np.asarray(result.detection_confidence).argmax())
-        xy = np.asarray(result.xy)[person]
-        conf = np.asarray(result.confidence)[person]
+        det_conf = np.asarray(result.detection_confidence)
+        if det_conf.size == 0:  # nobody in frame; is_empty() misses this case
+            return None
+        person = int(det_conf.argmax())
+        xy = np.asarray(result.xy)
+        conf = np.asarray(result.confidence)
+        if person >= len(xy) or person >= len(conf):
+            return None
+        xy, conf = xy[person], conf[person]
         return PoseState(
             keypoints={
                 name: (float(x), float(y), float(c))
