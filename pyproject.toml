@@ -1,0 +1,24 @@
+[project]
+name = "shot-tracker"
+version = "0.0.1"
+description = "Driveway basketball shot tracker: single-camera make/miss detection, arc and release metrics, annotated split-screen output."
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# Video I/O + drawing (upload mode, renderer). Not needed for the pure-engine tests.
+video = [
+    "opencv-python>=4.9",
+    "supervision>=0.20",
+]
+# Model runtimes are added at M1/M3 with exact pins.
+# rfdetr is a preview API — pin the exact version when installed; the keypoint
+# schema default changed to active-first in 1.8.x (see models/registry.py).
+dev = [
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
