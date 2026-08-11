@@ -3,22 +3,34 @@
 IDLE -> RISING -> DESCENDING -> RESOLVED(make|miss) -> IDLE
 
 - IDLE -> RISING: release detected — sustained upward velocity over
-  ``release_consecutive_frames`` observed frames. (M3 adds the wrist-
-  separation half of the release rule; velocity is the whole rule until pose
-  exists.)
+  ``release_consecutive_frames`` observed frames, and never while the ball is
+  inside the rim neighborhood (residual rim-bounce flight is not a release;
+  M3 adds the wrist-separation half of the rule).
 - RISING -> DESCENDING: vertical velocity sign flip while the ball is above
   release height (or already inside the rim neighborhood — a bank shot's
-  rebound off glass must not reset the machine).
-- DESCENDING -> RESOLVED: make/miss crossing check, ball exits the rim
-  neighborhood, or the trajectory ends.
+  rebound off glass must not reset the machine), or a positional rim-top
+  crossing observed before the smoothed velocity has flipped (flat arcs at
+  rim height live in that 1-2 frame EMA lag window).
+- DESCENDING -> RESOLVED: make/miss rules below, ball exits the rim
+  neighborhood, or the trajectory ends after an ``occlusion_hold_frames``
+  reappear window (a net occlusion routinely outlives the tracker's 4-frame
+  extrapolation, so track loss alone must not resolve the shot).
 - Anything that never rises toward the rim neighborhood is dribble noise: the
-  candidate is discarded without an event and the machine returns to IDLE.
+  candidate is discarded without an event and the machine returns to IDLE
+  (plan 6.2; revisit the neighborhood size at M2 if real airballs get eaten).
 
 Make (6.3): centroid crosses the rim's top edge moving downward within the
-rim's horizontal span, then is *observed* below the rim within the span — or
-is occluded for >= 2 frames after crossing and reappears below. Everything
-else is a miss, including rim-outs. ``verdict_confidence`` (clean | rattled |
+rim's horizontal span, then is *observed* below the rim near the span (a
+``span_tolerance_frac`` margin absorbs lateral net drift) — including via the
+occluded-crossing path where the passage itself fell in a detection gap.
+Everything else is a miss, including rim-outs — which resolve only when the
+ball leaves the rim neighborhood, never at the first pop-out frame, so one
+rattle produces one event. ``verdict_confidence`` (clean | rattled |
 occluded) is logged for auditing, never silently guessed.
+
+Crossing geometry uses the median rim box supplied by the engine once
+calibration has one (the rim doesn't move within a session), so per-frame
+detection jitter can't fake re-crossings.
 """
 
 from __future__ import annotations
@@ -44,7 +56,9 @@ class _ActiveShot:
     crossed: bool = False
     crossing_frame: Optional[int] = None
     crossing_x: Optional[float] = None
+    crossing_occluded: bool = False  # the crossing segment spanned unobserved frames
     post_cross_unobserved: int = 0
+    unseen_streak: int = 0  # consecutive frames with no track at all
     rattled: bool = False
 
 
@@ -77,20 +91,24 @@ class ShotStateMachine:
             self._phase = ShotPhase.IDLE
 
         if self._phase is ShotPhase.IDLE:
-            self._update_idle(ball, frame_index, t)
+            self._update_idle(ball, rim_box, frame_index, t)
             return None
-        if self._phase is ShotPhase.RISING:
-            return self._update_rising(ball, rim_box, frame_index, t, px_per_m)
-        return self._update_descending(ball, rim_box, frame_index, t, px_per_m)
+        return self._update_airborne(ball, rim_box, frame_index, t, px_per_m)
 
     # ------------------------------------------------------------------ IDLE
 
-    def _update_idle(self, ball: Optional[BallTrack], frame_index: int, t: float) -> None:
+    def _update_idle(
+        self, ball: Optional[BallTrack], rim_box: Optional[Box], frame_index: int, t: float
+    ) -> None:
         rising = (
             ball is not None
             and not ball.interpolated
             and ball.vy <= -self._cfg.release_min_upward_speed_px_s
         )
+        if rising and rim_box is not None and self._in_neighborhood(ball, rim_box):
+            # Upward flight inside the rim neighborhood is a bounce off the
+            # rim, not a release: a shooter's hands are never up there.
+            rising = False
         if not rising:
             self._streak = []
             return
@@ -109,37 +127,9 @@ class ShotStateMachine:
         self._streak = []
         self._phase = ShotPhase.RISING
 
-    # ---------------------------------------------------------------- RISING
+    # -------------------------------------------------------------- airborne
 
-    def _update_rising(
-        self,
-        ball: Optional[BallTrack],
-        rim_box: Optional[Box],
-        frame_index: int,
-        t: float,
-        px_per_m: Optional[float],
-    ) -> Optional[ShotEvent]:
-        shot = self._shot
-        if ball is None:  # trajectory ended mid-rise
-            if shot.entered_neighborhood:
-                return self._resolve(Verdict.MISS, VerdictConfidence.OCCLUDED, frame_index, px_per_m)
-            self._discard()
-            return None
-
-        self._record(ball, rim_box, frame_index, t)
-
-        if ball.vy > 0:  # vertical velocity sign flip
-            if ball.y < shot.release_y or shot.entered_neighborhood:
-                self._phase = ShotPhase.DESCENDING
-            else:
-                # Peaked at/below release height, never approached the rim:
-                # dribble noise.
-                self._discard()
-        return None
-
-    # ----------------------------------------------------------- DESCENDING
-
-    def _update_descending(
+    def _update_airborne(
         self,
         ball: Optional[BallTrack],
         rim_box: Optional[Box],
@@ -149,38 +139,93 @@ class ShotStateMachine:
     ) -> Optional[ShotEvent]:
         shot = self._shot
 
-        if ball is None:  # track lost for good
-            if not shot.entered_neighborhood:
-                self._discard()
+        if ball is None:
+            # Track lost. Hold the shot open for a reappear window — net/body
+            # occlusion at the rim routinely outlives the tracker's gap limit.
+            shot.unseen_streak += 1
+            if shot.unseen_streak <= self._cfg.occlusion_hold_frames:
                 return None
-            # Crossed or not, the ball vanished near the rim before the make
-            # rule could confirm an observation below it. Audit as occluded.
+            if not shot.entered_neighborhood:
+                self._discard()  # vanished without ever approaching the rim
+                return None
             return self._resolve(Verdict.MISS, VerdictConfidence.OCCLUDED, frame_index, px_per_m)
+        shot.unseen_streak = 0
 
         prev = shot.samples[-1] if shot.samples else None
         self._record(ball, rim_box, frame_index, t)
+        if rim_box is not None:
+            self._detect_crossing(prev, ball, rim_box, frame_index)
+
+        if self._phase is ShotPhase.RISING:
+            if shot.crossed:
+                # Positional descent through the rim top observed while the
+                # smoothed velocity still says "rising": we're descending.
+                self._phase = ShotPhase.DESCENDING
+            elif ball.vy > 0:  # vertical velocity sign flip
+                if ball.y < shot.release_y or shot.entered_neighborhood:
+                    self._phase = ShotPhase.DESCENDING
+                else:
+                    # Peaked at/below release height, never approached the
+                    # rim: dribble noise.
+                    self._discard()
+                    return None
+            else:
+                return None
+
+        if self._phase is not ShotPhase.DESCENDING:
+            return None
 
         if rim_box is None:
-            return None  # no rim geometry yet; keep accumulating trajectory
-        rim_x1, rim_top, rim_x2, rim_bottom = rim_box
-
-        # --- crossing check: top edge, downward, within horizontal span
-        if prev is not None and ball.y > prev[3]:
-            prev_y, prev_x = prev[3], prev[2]
-            if prev_y < rim_top <= ball.y:
-                frac = (rim_top - prev_y) / (ball.y - prev_y)
-                x_cross = prev_x + (ball.x - prev_x) * frac
-                if rim_x1 <= x_cross <= rim_x2:
-                    if shot.crossed:
-                        shot.rattled = True  # re-crossing after a bounce-out
-                    else:
-                        shot.crossed = True
-                        shot.crossing_frame = frame_index
-                        shot.crossing_x = x_cross
+            # No rim geometry yet (early session, flaky rim detector): the
+            # noise discard must still work or the machine wedges here.
+            if (
+                not ball.interpolated
+                and not shot.entered_neighborhood
+                and ball.y >= shot.release_y
+            ):
+                self._discard()
+            return None
 
         if shot.crossed:
             return self._check_after_crossing(ball, rim_box, frame_index, px_per_m)
         return self._check_no_crossing(ball, rim_box, frame_index, px_per_m)
+
+    # ------------------------------------------------------------- crossing
+
+    def _detect_crossing(
+        self,
+        prev: Optional[metrics.Sample],
+        ball: BallTrack,
+        rim_box: Box,
+        frame_index: int,
+    ) -> None:
+        """Register a downward rim-top crossing within the horizontal span.
+
+        Runs in RISING and DESCENDING alike (positional descent decides, not
+        the smoothed velocity), and across detection gaps — a passage that
+        happened entirely inside a gap registers on the reappear frame,
+        flagged occluded.
+        """
+        shot = self._shot
+        if prev is None or ball.y <= prev[3]:
+            return
+        prev_frame, _, prev_x, prev_y, prev_interp = prev
+        rim_x1, rim_top, rim_x2, _ = rim_box
+        if not (prev_y < rim_top <= ball.y):
+            return
+        frac = (rim_top - prev_y) / (ball.y - prev_y)
+        x_cross = prev_x + (ball.x - prev_x) * frac
+        if not (rim_x1 <= x_cross <= rim_x2):
+            return
+        if shot.crossed:
+            shot.rattled = True  # re-crossing after a bounce back above the rim
+        else:
+            shot.crossed = True
+            shot.crossing_frame = frame_index
+            shot.crossing_x = x_cross
+            shot.crossing_occluded = (
+                prev_interp or ball.interpolated or frame_index - prev_frame > 1
+            )
 
     def _check_after_crossing(
         self, ball: BallTrack, rim_box: Box, frame_index: int, px_per_m: Optional[float]
@@ -192,39 +237,50 @@ class ShotStateMachine:
             shot.post_cross_unobserved += 1
             return None
 
-        in_span = rim_x1 <= ball.x <= rim_x2
-        if ball.y > rim_bottom and in_span:
-            # Observed below the rim within the span: make. Confidence order:
-            # a rattled make stays "rattled" even if the net also occluded it.
-            if shot.rattled:
-                conf = VerdictConfidence.RATTLED
-            elif shot.post_cross_unobserved >= self._cfg.occlusion_frames_for_make:
-                conf = VerdictConfidence.OCCLUDED
-            else:
-                conf = VerdictConfidence.CLEAN
-            return self._resolve(Verdict.MAKE, conf, frame_index, px_per_m)
+        tol = self._cfg.span_tolerance_frac * (rim_x2 - rim_x1)
+        near_span = (rim_x1 - tol) <= ball.x <= (rim_x2 + tol)
 
-        if ball.y < rim_top and ball.vy < 0:
-            # Popped back out above the rim: rim-out.
-            return self._resolve(Verdict.MISS, VerdictConfidence.RATTLED, frame_index, px_per_m)
-        if not in_span and ball.y <= rim_bottom:
-            # Slid out sideways above the rim bottom: rim-out.
-            return self._resolve(Verdict.MISS, VerdictConfidence.RATTLED, frame_index, px_per_m)
-        if ball.y > rim_bottom and not in_span:
-            # Below rim height but outside the span — never seen through the
-            # cylinder. (Oblique-camera airball guard: span + below must BOTH
-            # pass for a make.)
+        if ball.y > rim_bottom:
+            if near_span:
+                # Observed below the rim: make. (The crossing was strict
+                # in-span; the reappearance check tolerates lateral net drift.)
+                occluded = (
+                    shot.crossing_occluded
+                    or shot.post_cross_unobserved >= self._cfg.occlusion_frames_for_make
+                )
+                if shot.rattled:
+                    conf = VerdictConfidence.RATTLED
+                elif occluded:
+                    conf = VerdictConfidence.OCCLUDED
+                else:
+                    conf = VerdictConfidence.CLEAN
+                return self._resolve(Verdict.MAKE, conf, frame_index, px_per_m)
+            # Below rim height but well wide of the span: bounced off and fell
+            # beside the rim without ever being seen through the cylinder.
             return self._resolve(Verdict.MISS, VerdictConfidence.RATTLED, frame_index, px_per_m)
 
-        shot.rattled = shot.rattled or ball.vy < 0  # bouncing on the rim
+        # Still at/above the rim bottom. A pop-out is NOT resolved at the
+        # first upward frame — the ball is still ballistic and may drop back
+        # through (rattle-in). One rattle, one event: wait for either a
+        # re-cross -> below (make) or a neighborhood exit (miss).
+        if ball.vy < 0:
+            shot.rattled = True
+        if not self._in_neighborhood(ball, rim_box):
+            conf = (
+                VerdictConfidence.OCCLUDED
+                if shot.post_cross_unobserved >= self._cfg.occlusion_frames_for_make
+                else VerdictConfidence.RATTLED
+            )
+            return self._resolve(Verdict.MISS, conf, frame_index, px_per_m)
         return None
 
     def _check_no_crossing(
         self, ball: BallTrack, rim_box: Box, frame_index: int, px_per_m: Optional[float]
     ) -> Optional[ShotEvent]:
         shot = self._shot
-        inside = self._in_neighborhood(ball, rim_box)
-        if shot.entered_neighborhood and not inside:
+        if ball.interpolated:
+            return None  # never resolve on evidence nobody observed
+        if shot.entered_neighborhood and not self._in_neighborhood(ball, rim_box):
             # Approached the rim, left it without ever crossing the top edge.
             return self._resolve(Verdict.MISS, VerdictConfidence.CLEAN, frame_index, px_per_m)
         if not shot.entered_neighborhood and ball.y >= shot.release_y:

@@ -38,6 +38,7 @@ class EngineConfig:
     gate_base_px: float = 75.0  # motion-gate radius floor
     gate_speed_factor: float = 1.5  # gate widens with predicted per-frame travel
     velocity_smoothing: float = 0.5  # EMA weight on the newest velocity sample
+    velocity_history_max_s: float = 1.0  # older last-observation is too stale for velocity
 
     # Release detection (plan 5): sustained upward velocity over 3 consecutive frames
     release_consecutive_frames: int = 3
@@ -46,6 +47,8 @@ class EngineConfig:
     # Shot state machine / make-miss (plan 6.2, 6.3)
     rim_neighborhood_scale: float = 3.0  # rim box expanded by this factor = "rim neighborhood"
     occlusion_frames_for_make: int = 2  # occluded >= this after crossing, reappears below -> make
+    occlusion_hold_frames: int = 30  # track lost mid-shot: wait this long for reappearance
+    span_tolerance_frac: float = 0.25  # lateral slack (x rim width) on the reappears-below check
 
     # Calibration (plan 5): rim inner diameter 18in; median rim width over first 100 frames
     rim_diameter_m: float = 0.4572

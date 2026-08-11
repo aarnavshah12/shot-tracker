@@ -60,7 +60,9 @@ class BallTrack:
 
     ``interpolated`` marks positions the tracker extrapolated through a
     detection gap rather than observed; verdict rules that require the ball to
-    be *seen* must check this flag.
+    be *seen* must check this flag. ``velocity_valid`` is False on a freshly
+    seeded track with no displacement history — vx/vy are 0.0 then and must
+    not be reported as a measured speed.
     """
 
     x: float
@@ -69,6 +71,7 @@ class BallTrack:
     vy: float
     interpolated: bool
     bbox: Optional[tuple[float, float, float, float]] = None
+    velocity_valid: bool = True
 
 
 @dataclass(frozen=True)

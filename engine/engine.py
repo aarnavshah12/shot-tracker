@@ -65,9 +65,12 @@ class ShotEngine:
         if rim is not None:
             self._calibration.observe_rim(rim)
 
-        # Rim geometry for shot logic: current detection, else the session's
-        # median box (the rim doesn't move within a session).
-        rim_box = rim.bbox if rim is not None else self._calibration.median_rim_box
+        # Rim geometry for shot logic: the session's median box once
+        # calibration has one — the rim doesn't move within a session, and a
+        # stable box keeps detection jitter out of the crossing checks. Live
+        # detections only bridge the pre-calibration frames.
+        median_box = self._calibration.median_rim_box
+        rim_box = median_box if median_box is not None else (rim.bbox if rim is not None else None)
 
         ball = self._tracker.update(ball_dets, t)
         if ball is not None:
@@ -105,6 +108,6 @@ class ShotEngine:
 
     @staticmethod
     def _speed_ms(ball, px_per_m) -> Optional[float]:
-        if ball is None or px_per_m is None:
-            return None
+        if ball is None or px_per_m is None or not ball.velocity_valid:
+            return None  # a freshly seeded track has no measured speed yet
         return math.hypot(ball.vx, ball.vy) / px_per_m

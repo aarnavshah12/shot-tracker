@@ -84,21 +84,23 @@ def peak_height_m(
 def release_velocity_ms(
     samples: Sequence[Sample], release_frame: int, px_per_m: Optional[float], n_frames: int = 5
 ) -> Optional[float]:
-    """Mean ball speed over the first ``n_frames`` post-release frames."""
+    """Mean ball speed over the first ``n_frames`` post-release frames.
+
+    Only observed samples on consecutive frames count: extrapolated positions
+    and gap-spanning segments carry tracker guesses, not measurements, and
+    would poison the mean silently.
+    """
     if px_per_m is None:
         return None
-    window = [s for s in samples if release_frame <= s[0] <= release_frame + n_frames]
-    speeds = _segment_speeds(window)
-    if not speeds:
-        return None
-    return (sum(speeds) / len(speeds)) / px_per_m
-
-
-def _segment_speeds(window: Sequence[Sample]) -> list[float]:
+    window = [
+        s for s in samples if release_frame <= s[0] <= release_frame + n_frames and not s[4]
+    ]
     speeds = []
     for prev, cur in zip(window, window[1:]):
         dt = cur[1] - prev[1]
-        if dt <= 0:
+        if cur[0] - prev[0] != 1 or dt <= 0:
             continue
         speeds.append(math.hypot(cur[2] - prev[2], cur[3] - prev[3]) / dt)
-    return speeds
+    if len(speeds) < 2:
+        return None
+    return (sum(speeds) / len(speeds)) / px_per_m

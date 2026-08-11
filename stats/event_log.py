@@ -1,7 +1,9 @@
-"""EventLog: appends resolved shots to sessions/<id>/shots.jsonl.
+"""EventLog: writes resolved shots to sessions/<id>/shots.jsonl.
 
 File I/O lives here, outside the engine — the engine emits FrameState, this
-consumes it (architecture diagram in the plan).
+consumes it (architecture diagram in the plan). A session dir corresponds to
+one processing run: opening truncates any previous shots.jsonl so re-running
+a session id can't interleave two runs' shot_ids.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ class EventLog:
         self._fh = None
 
     def __enter__(self) -> "EventLog":
-        self._fh = open(self.path, "a", encoding="utf-8")
+        self._fh = open(self.path, "w", encoding="utf-8")
         return self
 
     def __exit__(self, *exc) -> None:
