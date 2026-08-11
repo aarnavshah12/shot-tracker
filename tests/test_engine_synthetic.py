@@ -248,8 +248,8 @@ def test_two_shots_one_engine():
     and 2, no merged or phantom attempts."""
     positions = make_shot_positions()  # resolves MAKE at frame 41
     for i in range(60, 75):
-        positions[i] = (632.0, 900.0)  # back in hands
-    positions |= arc_positions(75, 640.0, apex_x=800.0, apex_y=150.0, last_x=940.0)
+        positions[i] = (630.0, 900.0)  # back in hands (continuous with the arc below)
+    positions |= arc_positions(75, 638.0, apex_x=800.0, apex_y=150.0, last_x=940.0)
     states = run(positions)
 
     events = events_of(states)
@@ -264,8 +264,10 @@ def test_two_shots_one_engine():
 def test_short_airball_is_a_clean_miss():
     """Arc apexes early and falls in front of the rim: enters the rim
     neighborhood, never crosses the top edge in-span, exits below."""
-    positions = {i: (632.0, 900.0) for i in range(5)}
-    positions |= arc_positions(5, 640.0, apex_x=800.0, apex_y=150.0, last_x=940.0)
+    # Idle spot sits ON the launch parabola: the first flight frame moves
+    # ~69px, inside the tracker gate, like a real continuous launch.
+    positions = {i: (630.0, 900.0) for i in range(5)}
+    positions |= arc_positions(5, 638.0, apex_x=800.0, apex_y=150.0, last_x=940.0)
     states = run(positions)
 
     events = events_of(states)
@@ -386,6 +388,23 @@ def test_calibration_recovers_from_garbage_cold_start():
     assert states[-1].scale_px_per_m == pytest.approx(SCALE_PX_PER_M, rel=0.02)
 
 
+def test_stream_end_mid_shot_flushes_via_finalize():
+    """Clip-per-shot footage cuts right at the outcome: a shot still open at
+    end-of-stream must resolve through finalize(), not vanish."""
+    positions = {i: (700.0, 900.0) for i in range(10)}
+    # Ends right after the in-span crossing (frame 40); no below-rim frames.
+    positions |= arc_positions(10, 708.0, apex_x=870.0, apex_y=150.0, last_x=948.0)
+    engine = ShotEngine(EngineConfig.upload(), detector=scripted_detector(positions))
+    states = [engine.process_frame(i, i / FPS) for i in range(max(positions) + 1)]
+
+    assert events_of(states) == []  # nothing resolved while streaming
+    flushed = engine.finalize()
+    assert len(flushed) == 1
+    assert flushed[0].verdict is Verdict.MISS  # crossing seen, landing never was
+    assert flushed[0].verdict_confidence is VerdictConfidence.OCCLUDED
+    assert engine.finalize() == []  # idempotent once idle
+
+
 def test_track_lost_near_rim_is_occluded_miss_after_hold():
     """No crossing, ball vanishes inside the rim neighborhood and never
     reappears: miss, flagged occluded, resolved only after the hold window."""
@@ -491,7 +510,8 @@ def test_modes_differ_only_in_model_size_config():
     for field in (
         "max_gap_frames", "gate_base_px", "gate_speed_factor", "gate_gap_growth_px",
         "velocity_smoothing", "velocity_history_max_s", "reseed_speed_px_s",
-        "release_consecutive_frames", "release_min_upward_speed_px_s",
+        "release_consecutive_frames", "release_min_upward_speed_ms",
+        "release_min_upward_speed_px_s",
         "rim_neighborhood_scale", "occlusion_frames_for_make",
         "occlusion_hold_frames", "span_tolerance_frac", "max_shot_seconds",
         "rattle_pop_max_rim_widths", "rim_diameter_m", "calibration_frames",

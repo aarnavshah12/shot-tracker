@@ -46,7 +46,7 @@ class ScaleCalibration:
         if rim.width <= 0:
             return
         median = self.median_rim_box
-        if median is not None and _iou(rim.bbox, median) < 0.5:
+        if median is not None and _disagrees(rim.bbox, median):
             self._drift_run += 1
             if self._drift_run >= self._drift_frames:
                 # The live rim has steadily contradicted the median: the
@@ -88,12 +88,21 @@ class ScaleCalibration:
         }
 
 
-def _iou(a: Box, b: Box) -> float:
-    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
-    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
-    if ix2 <= ix1 or iy2 <= iy1:
-        return 0.0
-    inter = (ix2 - ix1) * (iy2 - iy1)
-    area_a = (a[2] - a[0]) * (a[3] - a[1])
-    area_b = (b[2] - b[0]) * (b[3] - b[1])
-    return inter / (area_a + area_b - inter)
+def _disagrees(live: Box, med: Box) -> bool:
+    """Camera-moved / garbage-lock detector.
+
+    Judged on center and width only: detector v0's rim box height flaps with
+    net/backboard inclusion (measured on real footage), and full-box IoU
+    would read that flap as drift and thrash the calibration. The width is
+    the scale-bearing dimension and is stable within a few px per session.
+    """
+    med_w = med[2] - med[0]
+    if med_w <= 0:
+        return True
+    live_cx, live_cy = (live[0] + live[2]) / 2, (live[1] + live[3]) / 2
+    med_cx, med_cy = (med[0] + med[2]) / 2, (med[1] + med[3]) / 2
+    if abs(live_cx - med_cx) > 0.75 * med_w:
+        return True
+    if abs(live_cy - med_cy) > 1.5 * med_w:
+        return True
+    return not (0.5 <= (live[2] - live[0]) / med_w <= 2.0)

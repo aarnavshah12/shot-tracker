@@ -115,14 +115,19 @@ class ShotStateMachine:
             self._phase = ShotPhase.IDLE
 
         if self._phase is ShotPhase.IDLE:
-            self._update_idle(ball, rim_box, frame_index, t)
+            self._update_idle(ball, rim_box, frame_index, t, px_per_m)
             return None
         return self._update_airborne(ball, rim_box, frame_index, t, px_per_m)
 
     # ------------------------------------------------------------------ IDLE
 
     def _update_idle(
-        self, ball: Optional[BallTrack], rim_box: Optional[Box], frame_index: int, t: float
+        self,
+        ball: Optional[BallTrack],
+        rim_box: Optional[Box],
+        frame_index: int,
+        t: float,
+        px_per_m: Optional[float],
     ) -> None:
         observed = ball is not None and not ball.interpolated
         if self._await_exit and observed:
@@ -137,11 +142,17 @@ class ShotStateMachine:
             ):
                 self._await_exit = False
 
+        # Threshold in m/s once the session has a scale (a launch is ~7 m/s,
+        # raising the ball into the pocket ~1-2 m/s); px fallback before that.
+        if px_per_m is not None:
+            min_up = self._cfg.release_min_upward_speed_ms * px_per_m
+        else:
+            min_up = self._cfg.release_min_upward_speed_px_s
         rising = (
             observed
             and not self._await_exit
             and ball.velocity_valid
-            and ball.vy <= -self._cfg.release_min_upward_speed_px_s
+            and ball.vy <= -min_up
         )
         if not rising:
             self._streak = []

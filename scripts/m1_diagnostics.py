@@ -49,12 +49,15 @@ def process_clip(clip: Path, detector, cfg: EngineConfig) -> dict:
         events.extend(e.to_json_dict() for e in st.events)
         i += 1
     cap.release()
+    flushed = [e.to_json_dict() for e in engine.finalize()]
+    events.extend(flushed)
     return {
         "clip": clip.name,
         "fps": fps,
         "frames": i,
         "rows": rows,
         "events": events,
+        "flushed_events": len(flushed),
         "calibration": engine.calibration.to_metadata(),
     }
 

@@ -45,6 +45,8 @@ def run_upload(
             log.consume(state)
             if renderer is not None:
                 renderer.draw(frame, state)
+        # A shot still open when the clip ends is a real trajectory end.
+        log.consume_events(engine.finalize())
         log.write_session_metadata(
             {
                 "session_id": session_id,

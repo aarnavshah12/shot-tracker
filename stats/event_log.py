@@ -38,7 +38,11 @@ class EventLog:
             self._fh = None
 
     def consume(self, state: FrameState) -> None:
-        for event in state.events:
+        self.consume_events(state.events)
+
+    def consume_events(self, events) -> None:
+        """Also used for the engine's end-of-stream finalize() events."""
+        for event in events:
             self._fh.write(json.dumps(event.to_json_dict()) + "\n")
             self._fh.flush()
 

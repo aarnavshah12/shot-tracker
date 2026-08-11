@@ -42,8 +42,14 @@ class EngineConfig:
     velocity_history_max_s: float = 1.0  # older last-observation is too stale for velocity
     reseed_speed_px_s: float = 2500.0  # max plausible ball speed for post-drop re-seeding
 
-    # Release detection (plan 5): sustained upward velocity over 3 consecutive frames
+    # Release detection (plan 5): sustained upward velocity over 3 consecutive
+    # frames. The threshold lives in m/s (via calibrated scale) so raising the
+    # ball into the shot pocket (~1-2 m/s) doesn't arm a release the way a
+    # real launch (~7 m/s) does; the px value is the pre-calibration fallback.
+    # (2.5, not higher: at 30 fps, motion blur plus EMA smoothing measures a
+    # real ~5 m/s launch as low as ~2.7 m/s — seen on session-2026-08-11.)
     release_consecutive_frames: int = 3
+    release_min_upward_speed_ms: float = 2.5
     release_min_upward_speed_px_s: float = 200.0
 
     # Shot state machine / make-miss (plan 6.2, 6.3)
