@@ -13,9 +13,12 @@ video = [
     "opencv-python>=4.9",
     "supervision>=0.20",
 ]
-# Model runtimes are added at M1/M3 with exact pins.
-# rfdetr is a preview API — pin the exact version when installed; the keypoint
-# schema default changed to active-first in 1.8.x (see models/registry.py).
+# Detector v0 runtime (M1). rfdetr (pose, M3) is a preview API — pin the
+# exact version when installed; the keypoint schema default changed to
+# active-first in 1.8.x (see models/registry.py).
+models = [
+    "inference==1.3.10",
+]
 dev = [
     "pytest>=8",
 ]
