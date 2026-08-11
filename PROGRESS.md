@@ -31,12 +31,11 @@ Project/version: `aarnavs-space/basketball-shooting-robot-kbsro` v1, training ID
 
 - **50-shot ground-truth labels** — the M2 acceptance gate. First session (17
   clips) is in; a labeled ~50-shot session (60 fps please) is the next input.
-- Confirm two clips from session-2026-08-11: does `IMG_7103.MOV` contain a
-  real shot attempt (engine segmented nothing there)? And what was
-  `IMG_7097.MOV`'s true outcome (engine says make/rattled; owner's note
-  implies only 7101 was a make → likely the known 2D rattle false-make)?
+- ~~Confirm 7103 / 7097~~ — answered 2026-08-11: 7103 is a real (missed)
+  attempt the engine failed to segment; 7097 is a genuine rattle-in make
+  (engine verdict was correct).
 - Future sessions: shoot at **60 fps** (current clips are 30 fps; crossing
-  frames are sparse).
+  frames are sparse and soft launches blur below the release threshold).
 - Homography clicks + look sign-off at M4.
 
 ## M1 summary (2026-08-11)
@@ -54,10 +53,21 @@ on all 17 clips of session-2026-08-11 (~62s total, 30 fps).
   annotations in the source dataset), not a reason to retrain the bootstrap.
   Engine compensates: shot geometry uses the median box; calibration drift
   detection judges center+width only.
-- Verdicts vs owner's single ground-truth note (only 7101 is a make): 16/17
-  clips segmented as exactly one attempt; 7101 → make/clean ✓; one false
-  make (7097, make/rattled — the documented 2D rattle ambiguity, correctly
-  audit-flagged `rattled`); 7103 unsegmented (owner to confirm content).
+- Verdicts (owner ground truth, confirmed 2026-08-11): **16/16 segmented
+  attempts scored correctly** — 7101 make/clean ✓, 7097 make/rattled ✓ (a
+  real rattle-in: "bounced on the rim a couple times and then made it" — the
+  rattle policy called it right on real footage), 14 misses ✓. The one miss
+  of the milestone is segmentation, not verdicts: 7103 (below).
+- **7103 = confirmed missed attempt** (owner: real attempt, no make). Root
+  cause from per-frame data: soft short-range launch measured at only
+  2.2–2.7 m/s smoothed (30 fps blur + detection gap at launch diluting the
+  span-averaged velocity); the 3-frame streak died 23 px/s short of the
+  2.5 m/s threshold. Windups measure 2.0–3.6 m/s, so velocity alone cannot
+  separate soft launches from windups at 30 fps. Fix path: M3's
+  wrist-separation release rule (lower the velocity floor once ball-in-hand
+  frames are excluded by pose), plus 60 fps footage. Launch-window frames
+  with the ball in hands also go on the M6 auto-label list (blur/occlusion
+  hard case).
 - Engine changes driven by real footage: release threshold expressed in m/s
   via calibrated scale (2.5 m/s; the ball-raise into the pocket was arming
   releases at 200 px/s), calibration drift check tolerant of height flap, and
