@@ -22,6 +22,7 @@ Project/version: `aarnavs-space/basketball-shooting-robot-kbsro` v1, training ID
 | Polled (UTC) | Status |
 |---|---|
 | 2026-08-11 ~14:00 | running (launched 2026-08-11 13:34) |
+| 2026-08-11 ~14:25 | running |
 
 ## Waiting on owner (Aarnav)
 
@@ -32,3 +33,4 @@ Project/version: `aarnavs-space/basketball-shooting-robot-kbsro` v1, training ID
 ## Log
 
 - **2026-08-11** — Repo initialized. `.gitignore` first commit (excludes `.claude/`, `AGENTS.md`, plan doc, `sessions/`, `.env`). Polled detector v0: running. Starting M0: engine skeleton, config system, sources, renderer stub, synthetic-parabola test.
+- **2026-08-11** — M0 implemented: `ShotEngine` (frame-in/events-out, detector injected as a callable), `FrameState`/`ShotEvent` types, single-ball tracker with constant-velocity gate + ≤4-frame gap extrapolation, shot state machine (IDLE→RISING→DESCENDING→RESOLVED with plan 6.3 make/miss + rattled/occluded flags), rim-width scale calibration, metrics (entry angle via centered quadratic fit, peak height, release velocity), `VideoFileSource`, `CameraSource` interface stub (no camera code until M4 passes), renderer stub, jsonl event log, stats queries, upload pipeline wiring. 9 tests green incl. the M0 acceptance test (scripted parabola → exactly one RESOLVED make) plus airball, rim-out, dribble-noise, serialization-schema, and mode-config-parity tests. Adversarial multi-agent review of M0 in flight; detector v0 still training at last poll.
