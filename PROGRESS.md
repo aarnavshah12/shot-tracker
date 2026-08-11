@@ -7,12 +7,12 @@ Driveway shot tracker build log. Milestones M0–M6 per the build plan.
 | Milestone | State | Notes |
 |---|---|---|
 | M0 Repo + engine skeleton | **done** 2026-08-11 | acceptance test green; two adversarial review rounds applied |
-| M1 Detector v0 integration | blocked on training + footage | detector v0 still training |
-| M2 Shot logic | engine logic largely built in M0; acceptance pending owner's 50-shot clip | |
-| M3 Pose | not started | |
-| M4 Renderer | not started | needs AA reference screenshots in assets/reference/ |
+| M1 Detector v0 integration | **done** 2026-08-11 | ball-in-flight 98.1% (target 90) PASS; rim IoU gap logged as M6 fine-tune input |
+| M2 Shot logic | engine built and exercised on real clips; acceptance pending owner's 50-shot ground truth | 16/17 clips segmented; 1 false make (audit-flagged rattled) |
+| M3 Pose | not started | needed to fix release-timing accuracy (wrist rule) |
+| M4 Renderer | not started | reference layout documented from owner's screenshots |
 | M5 Modes | not started | |
-| M6 Precision + polish | not started | |
+| M6 Precision + polish | not started | fine-tune inputs logged below |
 
 ## Detector v0 (bootstrap, training on Roboflow — poll, never retrain)
 
@@ -25,12 +25,48 @@ Project/version: `aarnavs-space/basketball-shooting-robot-kbsro` v1, training ID
 | 2026-08-11 ~14:25 | running |
 | 2026-08-11 ~15:00 | running |
 | 2026-08-11 ~15:40 | running |
+| 2026-08-11 ~16:25 | **finished** (ended 16:21 UTC) — mAP50 88.84, precision 75.7, recall 84.9 |
 
 ## Waiting on owner (Aarnav)
 
-- Driveway footage (3+ sessions, 60 fps landscape, rim in upper third) — needed before M1. **Critical path**: training will likely finish first.
-- 50-shot ground-truth labels — needed for M2 acceptance.
-- AA reference screenshots into `assets/reference/` — needed for M4.
+- **50-shot ground-truth labels** — the M2 acceptance gate. First session (17
+  clips) is in; a labeled ~50-shot session (60 fps please) is the next input.
+- Confirm two clips from session-2026-08-11: does `IMG_7103.MOV` contain a
+  real shot attempt (engine segmented nothing there)? And what was
+  `IMG_7097.MOV`'s true outcome (engine says make/rattled; owner's note
+  implies only 7101 was a make → likely the known 2D rattle false-make)?
+- Future sessions: shoot at **60 fps** (current clips are 30 fps; crossing
+  frames are sparse).
+- Homography clicks + look sign-off at M4.
+
+## M1 summary (2026-08-11)
+
+Detector v0 loaded by model ID via pinned `inference==1.3.10`, running
+locally (ONNX). Full pipeline (VideoFileSource → ShotEngine → EventLog) ran
+on all 17 clips of session-2026-08-11 (~62s total, 30 fps).
+
+- **Ball detected in flight: 98.1% (759/774 frames) — PASSES the ≥90% bar.**
+- **Rim: detected on ~100% of frames, but box unstable**: only 44.1% of
+  detections reach IoU ≥0.8 vs the session median (median IoU 0.776 vs 0.8
+  target). Cause measured on footage: box height flaps with net/backboard
+  inclusion; width is stable within a few px. Per plan, this gap is an input
+  to the **M6 fine-tune** (oversample rim+net frames, inconsistent rim box
+  annotations in the source dataset), not a reason to retrain the bootstrap.
+  Engine compensates: shot geometry uses the median box; calibration drift
+  detection judges center+width only.
+- Verdicts vs owner's single ground-truth note (only 7101 is a make): 16/17
+  clips segmented as exactly one attempt; 7101 → make/clean ✓; one false
+  make (7097, make/rattled — the documented 2D rattle ambiguity, correctly
+  audit-flagged `rattled`); 7103 unsegmented (owner to confirm content).
+- Engine changes driven by real footage: release threshold expressed in m/s
+  via calibrated scale (2.5 m/s; the ball-raise into the pocket was arming
+  releases at 200 px/s), calibration drift check tolerant of height flap, and
+  `ShotEngine.finalize()` — clip-per-shot footage cuts at the outcome, so
+  end-of-stream now resolves open shots (occluded-confidence) instead of
+  dropping them.
+- Release velocities after fixes: 3.6–6.6 m/s (plausible); release *timing*
+  is still velocity-only and will tighten at M3 with the wrist-separation
+  rule.
 
 ## M0 summary
 
@@ -72,3 +108,4 @@ Known limitations (documented decisions, revisit at M2/M6 with real footage):
 - **2026-08-11** — Adversarial review round 1 (35 agents): 25 confirmed findings — rattle double-counting, EMA-lag crossing gap, occlusion cap at tracker gap, gate/velocity spikes, extrapolated-sample pollution, test-quality gaps. All fixed; suite grew to 17 tests.
 - **2026-08-11** — Verification round 2 (3 agents + attack sims): 11 findings incl. overcorrections from round 1 — ghost/gap-fabricated crossings, ungated re-seeding (phantom shots, wedged holds), rattle-out scored as make, release guard eating close-range shots, calibration lock-in on garbage, event-log truncation vs plan append. All fixed; suite at 21 tests; attack sims re-run clean. **M0 closed.**
 - **2026-08-11** — Detector v0 still `running` at last poll (~15:40 UTC). Next: poll on next session/wake; M1 starts when training completes AND first footage arrives.
+- **2026-08-11 (pm)** — Training finished (mAP50 88.84). Owner delivered 17 clips (30 fps) into `footage/session-2026-08-11/` and the AA reference screenshots (transcribed to `assets/reference/aa-reference-layout.md`). Wired RFDETRDetector through pinned inference runtime; ran all clips; fixed calibration drift thrash, early-release arming, and added end-of-stream finalize. **M1 closed**: ball 98.1% PASS; rim box stability shortfall documented as M6 fine-tune input. Owner question noted: Roboflow Workflows deliberately not used — plan architecture injects the detector as a local callable into our stateful engine ("free and local" product angle; Workflows wrap only the detection block and add a serving hop).
