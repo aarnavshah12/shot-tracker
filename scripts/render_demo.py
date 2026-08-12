@@ -1,7 +1,9 @@
-"""M4 demo renderer CLI: full split-screen annotated video for a clip.
+"""M4 demo renderer CLI: full split-screen annotated video for clips.
 
-Usage: .venv/bin/python scripts/render_demo.py IMG_7101 [IMG_7097 ...]
-Writes sessions/demo/<clip>_demo.mp4 (h264/yuv420p, source audio muxed).
+Usage: .venv/bin/python scripts/render_demo.py [--out DIR] IMG_7101 [...]
+       .venv/bin/python scripts/render_demo.py --out sessions/annotated --all
+Writes <out>/<clip>_demo.mp4 (h264/yuv420p, source audio muxed); skips clips
+already rendered so an interrupted batch resumes.
 """
 
 from __future__ import annotations
@@ -21,10 +23,9 @@ from models.registry import DETECTOR_V0_MODEL_ID
 from render.renderer import Renderer, VideoSink
 
 FOOTAGE = Path("footage/session-2026-08-11")
-OUT = Path("sessions/demo")
 
 
-def render(stem: str, detector, pose_model) -> Path:
+def render(stem: str, detector, pose_model, out_dir: Path) -> Path:
     cfg = EngineConfig.upload()
     src = FOOTAGE / f"{stem}.MOV"
     cap = cv2.VideoCapture(str(src))
@@ -33,7 +34,7 @@ def render(stem: str, detector, pose_model) -> Path:
 
     engine = ShotEngine(cfg, detector=detector, pose_model=pose_model)
     renderer = Renderer(cfg, initials="AA", total_frames=total)
-    sink = VideoSink(OUT / f"{stem}_demo.mp4", fps)
+    sink = VideoSink(out_dir / f"{stem}_demo.mp4", fps)
 
     i = 0
     while True:
@@ -49,13 +50,28 @@ def render(stem: str, detector, pose_model) -> Path:
 
 
 def main() -> None:
+    args = sys.argv[1:]
+    out_dir = Path("sessions/demo")
+    if "--out" in args:
+        i = args.index("--out")
+        out_dir = Path(args[i + 1])
+        del args[i : i + 2]
+    if "--all" in args:
+        stems = sorted(p.stem for p in FOOTAGE.glob("*.MOV"))
+    else:
+        stems = args or ["IMG_7101"]
+
     cfg = EngineConfig.upload()
     detector = RFDETRDetector(
         DETECTOR_V0_MODEL_ID, cfg.detector.ball_confidence, cfg.detector.rim_confidence
     )
     pose_model = RFDETRPoseModel()
-    for stem in sys.argv[1:] or ["IMG_7101"]:
-        print(render(stem, detector, pose_model), flush=True)
+    for stem in stems:
+        target = out_dir / f"{stem}_demo.mp4"
+        if target.exists():
+            print(f"{target} (cached)", flush=True)
+            continue
+        print(render(stem, detector, pose_model, out_dir), flush=True)
 
 
 if __name__ == "__main__":
