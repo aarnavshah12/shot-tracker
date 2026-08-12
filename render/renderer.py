@@ -136,6 +136,11 @@ class VideoSink:
     def write(self, canvas: np.ndarray) -> None:
         self._writer.write(canvas)
 
+    def abort(self) -> None:
+        """Error path: release the writer and remove the temp render."""
+        self._writer.release()
+        self._tmp.unlink(missing_ok=True)
+
     def close(self, audio_source: Optional[str | Path] = None) -> Path:
         self._writer.release()
         try:
@@ -146,16 +151,24 @@ class VideoSink:
             self._tmp.replace(self.out_path)  # no ffmpeg: raw mp4v output
             return self.out_path
         base = [ffmpeg, "-y", "-i", str(self._tmp)]
+        # NO -shortest here: it would truncate the video to the audio track's
+        # length (clips whose mic cuts early lost most of their frames).
+        # Video length always wins; a shorter audio track simply ends early.
         encode = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
                   "-pix_fmt", "yuv420p"]
         if audio_source is not None:
             cmd = base + ["-i", str(audio_source), "-map", "0:v:0", "-map", "1:a:0?",
-                          "-c:a", "aac", "-shortest"] + encode + [str(self.out_path)]
+                          "-c:a", "aac"] + encode + [str(self.out_path)]
         else:
             cmd = base + encode + [str(self.out_path)]
         result = subprocess.run(cmd, capture_output=True)
         if result.returncode != 0 and audio_source is not None:
             # Source may have no audio stream in a mappable form: video-only.
-            subprocess.run(base + encode + [str(self.out_path)], capture_output=True)
+            result = subprocess.run(base + encode + [str(self.out_path)], capture_output=True)
+        if result.returncode != 0:
+            # Both encodes failed: keep the raw render rather than deleting it
+            # and returning a phantom path.
+            self._tmp.replace(self.out_path)
+            return self.out_path
         self._tmp.unlink(missing_ok=True)
         return self.out_path

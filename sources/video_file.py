@@ -24,15 +24,17 @@ class VideoFileSource:
         if not self._cap.isOpened():
             raise IOError(f"could not open video: {self.path}")
         self.fps = self._cap.get(cv2.CAP_PROP_FPS) or 30.0
-        self.frame_count = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        # Streamed/remuxed containers can report garbage (huge negative)
+        # frame counts; clamp so consumers never see a negative total.
+        self.frame_count = max(0, int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT)))
+        self.warnings: list[str] = []
         if self.fps < 45:
             # Plan 12: the pipeline must run at 30 fps, but rim-crossing frames
-            # may be too sparse for `clean` verdicts.
-            import warnings
-
-            warnings.warn(
-                f"{self.path.name}: {self.fps:.0f} fps footage — rim-crossing "
-                "frames may be too sparse for clean verdicts (60 fps recommended)"
+            # may be too sparse for `clean` verdicts. Recorded on the source
+            # (not warnings.warn) so the upload UI can show it to the user.
+            self.warnings.append(
+                f"{self.fps:.0f} fps footage — rim-crossing frames may be too "
+                "sparse for clean verdicts (60 fps recommended)"
             )
         return self
 

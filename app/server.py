@@ -22,7 +22,8 @@ from app.pipeline import run_upload
 from engine.config import EngineConfig
 
 ALLOWED_SUFFIXES = {".mov", ".mp4", ".m4v", ".avi", ".mkv"}
-UPLOAD_ROOT = Path("sessions/uploads")
+# Anchored to the repo, not the cwd (a server launched from / must not 500).
+UPLOAD_ROOT = Path(__file__).resolve().parent.parent / "sessions" / "uploads"
 
 app = FastAPI(title="shot tracker")
 
@@ -74,6 +75,7 @@ def _worker() -> None:
                 progress=on_progress,
             )
             job["result"] = result
+            job["warnings"] = result["warnings"]
             job["status"] = "done"
         except Exception as exc:  # surfaced to the UI, never a dead job
             job["status"] = "error"
@@ -100,6 +102,8 @@ async def upload(file: UploadFile) -> dict:
     with open(source, "wb") as fh:
         while chunk := await file.read(1 << 20):
             fh.write(chunk)
+    # All keys pre-created: the worker only overwrites values, so the status
+    # endpoint can copy the dict without racing a size change.
     _jobs[job_id] = {
         "id": job_id,
         "filename": file.filename,
@@ -107,6 +111,9 @@ async def upload(file: UploadFile) -> dict:
         "status": "queued",
         "frames_done": 0,
         "frames_total": 0,
+        "warnings": [],
+        "error": None,
+        "result": None,
     }
     _ensure_worker()
     _queue.put(job_id)
@@ -118,18 +125,21 @@ def job_status(job_id: str) -> dict:
     job = _jobs.get(job_id)
     if job is None:
         raise HTTPException(404, "no such job")
-    out = {k: v for k, v in job.items() if k not in ("source",)}
-    if job["status"] == "done":
+    out = {k: v for k, v in job.items() if k not in ("source", "result")}
+    if job["status"] == "done" and job["result"] is not None:
         out["summary"] = job["result"]["summary"]
     return out
 
 
 def _result_file(job_id: str, key: str) -> Path:
     job = _jobs.get(job_id)
-    if job is None or job.get("status") != "done":
+    if job is None or job.get("status") != "done" or job.get("result") is None:
         raise HTTPException(404, "job not finished")
-    path = Path(job["result"][key] or "")
-    if not path.exists():
+    raw = job["result"].get(key)
+    if not raw:
+        raise HTTPException(404, f"{key} not available")
+    path = Path(raw)
+    if not path.is_file():
         raise HTTPException(404, f"{key} not available")
     return path
 
@@ -218,8 +228,15 @@ async function go(f) {
   if (!r.ok) { status.textContent = 'upload failed: ' + (await r.text()); return; }
   poll((await r.json()).job_id);
 }
+let pollFails = 0;
 async function poll(id) {
-  const r = await fetch('/jobs/' + id); const j = await r.json();
+  let j;
+  try {
+    const r = await fetch('/jobs/' + id); j = await r.json(); pollFails = 0;
+  } catch (e) {
+    if (++pollFails > 8) { status.textContent = 'lost contact with the server'; return; }
+    setTimeout(() => poll(id), 1200); return;
+  }
   if (j.status === 'error') { status.textContent = 'failed: ' + j.error; return; }
   if (j.status !== 'done') {
     const pct = j.frames_total ? Math.round(100 * j.frames_done / j.frames_total) : 2;
@@ -228,7 +245,8 @@ async function poll(id) {
       ? `processing frame ${j.frames_done} / ${j.frames_total}` : j.status + '…';
     setTimeout(() => poll(id), 700); return;
   }
-  fill.style.width = '100%'; status.textContent = 'done';
+  fill.style.width = '100%';
+  status.textContent = (j.warnings && j.warnings.length) ? '\u26a0 ' + j.warnings.join(' \u2022 ') : 'done';
   const s = j.summary, t = document.getElementById('tiles');
   const fg = s.fg_pct === null ? '—' : s.fg_pct.toFixed(0) + '%';
   t.innerHTML = `
