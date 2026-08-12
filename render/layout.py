@@ -8,27 +8,30 @@ corners, filled class+confidence label tab).
 
 CANVAS_W, CANVAS_H = 1920, 1080
 
-# Video pane (source scaled to fit, top-left)
-VIDEO_RECT = (0, 0, 1056, 594)  # x, y, w, h
+# Video pane dominates: 78% of width, 16:9 (owner request — video as large
+# as possible while every panel stays readable).
+VIDEO_RECT = (0, 0, 1500, 844)  # x, y, w, h
 
-# Bottom-left strip under the video
-INSET_RECT = (16, 610, 352, 454)  # Pose at Release
-TABLE_RECT = (384, 610, 656, 454)  # Joint Angles
+# Compact bottom-left strip under the video
+INSET_RECT = (16, 872, 208, 192)  # Pose at Release (tab sits above the box)
+TABLE_RECT = (248, 858, 1236, 206)  # Joint Angles
 
-# Right column: three stacked panels
-PANEL_X = 1056
+# Slim right rail: three stacked panels
+PANEL_X = 1500
 PANEL_W = CANVAS_W - PANEL_X
 PANEL_H = CANVAS_H // 3
-PANEL_PAD = 44
+PANEL_PAD = 32
 
-# Roboflow palette (BGR)
-SURFACE = (251, 250, 249)      # Cool Gray 50  #F9FAFB
-SURFACE_ALT = (246, 244, 243)  # Cool Gray 100 #F3F4F6
-LINE = (219, 213, 209)         # Cool Gray 300 #D1D5DB
-INK = (39, 24, 17)             # Cool Gray 900 #111827
-GRAY = (128, 114, 107)         # Cool Gray 500 #6B7280
-SILVER = (175, 163, 156)       # Cool Gray 400 #9CA3AF
-VIOLET = (237, 58, 124)        # Violet 600 #7C3AED — primary accent
+# Roboflow palette, dark mode (BGR) — brand rule: Cool Gray 900 canvas,
+# violet accents on dark.
+SURFACE = (39, 24, 17)         # Cool Gray 900 #111827 — canvas
+SURFACE_ALT = (55, 41, 31)     # Cool Gray 800 #1F2937 — cards
+LINE = (81, 65, 55)            # Cool Gray 700 #374151 — hairlines
+INK = (251, 250, 249)          # Cool Gray 50 #F9FAFB — big numerals on dark
+GRAY = (175, 163, 156)         # Cool Gray 400 #9CA3AF — small text
+SILVER = (85, 69, 75)          # Cool Gray 600 #4B5563 — the idle "NO"
+VIOLET = (237, 58, 124)        # Violet 600 #7C3AED — primary accent / fills
+VIOLET_TEXT = (250, 138, 167)  # Violet 400 #A78BFA — violet type on dark
 VIOLET_LIGHT = (253, 181, 196) # Violet 300 #C4B5FD
 GREEN = (129, 185, 16)         # Emerald 500 #10B981
 RED = (68, 68, 239)            # Red 500 #EF4444
@@ -43,9 +46,9 @@ TRAIL_COLOR = AMBER
 SKELETON_COLOR = VIOLET_LIGHT
 TAG_COLOR = VIOLET
 
-# Type scale (Inter px sizes)
-HEADER_SIZE = 40
-BIG_SIZE = 124
-SMALL_SIZE = 28
-TABLE_SIZE = 26
-COUNTER_SIZE = 26
+# Type scale (Inter px sizes), sized for the slim rail
+HEADER_SIZE = 30
+BIG_SIZE = 72
+SMALL_SIZE = 20
+TABLE_SIZE = 22
+COUNTER_SIZE = 24

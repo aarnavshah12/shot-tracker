@@ -147,7 +147,7 @@ def draw_panel_chrome(canvas: np.ndarray) -> None:
     cv2.line(canvas, (L.PANEL_X, 0), (L.PANEL_X, L.CANVAS_H), L.LINE, 2)
     cv2.line(canvas, (0, strip_y), (L.PANEL_X, strip_y), L.LINE, 2)
     for x, y, w, h in (L.INSET_RECT, L.TABLE_RECT):
-        cv2.rectangle(canvas, (x, y), (x + w, y + h), (255, 255, 255), -1)
+        cv2.rectangle(canvas, (x, y), (x + w, y + h), L.SURFACE_ALT, -1)
         cv2.rectangle(canvas, (x, y), (x + w, y + h), L.LINE, 1)
 
 
@@ -156,54 +156,56 @@ def draw_panels(canvas: np.ndarray, hud, text: TextDrawer) -> None:
 
     # Panel 1: SHOT SPEED
     y = 0
-    text.queue("SHOT SPEED", (x, y + 40), L.HEADER_SIZE, L.VIOLET, weight=700)
+    text.queue("SHOT SPEED", (x, y + 36), L.HEADER_SIZE, L.VIOLET_TEXT, weight=700)
     big = f"{hud.shot_speed_kmh:.0f} KM/H" if hud.shot_speed_kmh is not None else "--"
-    text.queue(big, (x, y + 116), L.BIG_SIZE, L.INK, weight=700)
+    text.queue(big, (x, y + 100), L.BIG_SIZE, L.INK, weight=700)
     cur = f"{hud.current_speed_kmh:.0f}" if hud.current_speed_kmh is not None else "--"
-    text.queue(f"CURRENT SPEED: {cur} KM/H", (x, y + 268), L.SMALL_SIZE, L.GRAY, weight=500)
+    text.queue(f"CURRENT SPEED: {cur} KM/H", (x, y + 254), L.SMALL_SIZE, L.GRAY, weight=500)
     bpx = f"{hud.ball_px:.1f}" if hud.ball_px is not None else "--"
-    text.queue(f"BALL PX: {bpx}", (x, y + 306), L.SMALL_SIZE, L.GRAY, weight=500)
+    text.queue(f"BALL PX: {bpx}", (x, y + 286), L.SMALL_SIZE, L.GRAY, weight=500)
 
     # Panel 2: BALL DISTANCE TO RIM
     y = L.PANEL_H
-    text.queue("BALL DISTANCE TO", (x, y + 40), L.HEADER_SIZE, L.VIOLET, weight=700)
-    text.queue("RIM", (x, y + 90), L.HEADER_SIZE, L.VIOLET, weight=700)
+    text.queue("BALL DISTANCE TO", (x, y + 36), L.HEADER_SIZE, L.VIOLET_TEXT, weight=700)
+    text.queue("RIM", (x, y + 74), L.HEADER_SIZE, L.VIOLET_TEXT, weight=700)
     big = f"{hud.distance_m:.1f} M" if hud.distance_m is not None else "-.- M"
-    text.queue(big, (x, y + 162), L.BIG_SIZE, L.INK, weight=700)
+    text.queue(big, (x, y + 138), L.BIG_SIZE, L.INK, weight=700)
     if hud.offset_x_m is not None:
         off = f"X: {hud.offset_x_m:+.2f}M  Y: {hud.offset_y_m:+.2f}M"
     else:
         off = "X: --  Y: --"
-    text.queue(off, (x, y + 312), L.SMALL_SIZE, L.GRAY, weight=500)
+    text.queue(off, (x, y + 286), L.SMALL_SIZE, L.GRAY, weight=500)
 
     # Panel 3: MAKE?
     y = 2 * L.PANEL_H
-    text.queue("MAKE?", (x, y + 40), L.HEADER_SIZE, L.VIOLET, weight=700)
+    text.queue("MAKE?", (x, y + 36), L.HEADER_SIZE, L.VIOLET_TEXT, weight=700)
     if hud.verdict is None:
-        text.queue("NO", (x, y + 116), L.BIG_SIZE, L.SILVER, weight=700)
+        text.queue("NO", (x, y + 100), L.BIG_SIZE, L.SILVER, weight=700)
         status = (
             "CROSS DETECTOR: ACTIVE" if hud.shot_active else "CROSS DETECTOR: WAITING"
         )
-        text.queue(status, (x, y + 276), L.SMALL_SIZE, L.GRAY, weight=500)
+        text.queue(status, (x, y + 254), L.SMALL_SIZE, L.GRAY, weight=500)
     else:
         made = hud.verdict == "make"
         text.queue(
             "MAKE!!" if made else "MISS",
-            (x, y + 116), L.BIG_SIZE, L.GREEN if made else L.RED, weight=700,
+            (x, y + 100), L.BIG_SIZE, L.GREEN if made else L.RED, weight=700,
         )
         if hud.cross_x_m is not None:
             text.queue(
                 f"CROSS AT X: {hud.cross_x_m:+.2f}M",
-                (x, y + 276), L.SMALL_SIZE, L.GRAY, weight=500,
+                (x, y + 254), L.SMALL_SIZE, L.GRAY, weight=500,
             )
-        text.queue(f"({hud.verdict_confidence})", (x, y + 314), L.SMALL_SIZE, L.GRAY, weight=500)
+        text.queue(f"({hud.verdict_confidence})", (x, y + 286), L.SMALL_SIZE, L.GRAY, weight=500)
 
 
 def draw_pose_inset(canvas: np.ndarray, pose: Optional[PoseState], text: TextDrawer, min_conf: float) -> None:
     x, y, w, h = L.INSET_RECT
-    text.queue("Pose at Release", (x + 14, y + 22), 24, L.VIOLET, weight=600)
+    cv2.rectangle(canvas, (x, y), (x + w, y + h), L.VIOLET, 2)
+    cv2.rectangle(canvas, (x - 1, y - 26), (x + w + 1, y), L.VIOLET, -1)
+    text.queue("pose at release", (x + 8, y - 13), 18, L.WHITE, weight=600, anchor="lm")
     if pose is None:
-        text.queue("(no pose)", (x + 14, y + 70), L.SMALL_SIZE, L.SILVER, weight=400)
+        text.queue("(no pose)", (x + 14, y + 40), L.SMALL_SIZE, L.SILVER, weight=400)
         return
     pts = {
         n: (px, py)
@@ -211,11 +213,11 @@ def draw_pose_inset(canvas: np.ndarray, pose: Optional[PoseState], text: TextDra
         if c >= min_conf
     }
     if len(pts) < 4:
-        text.queue("(low confidence)", (x + 14, y + 70), L.SMALL_SIZE, L.SILVER, weight=400)
+        text.queue("(low confidence)", (x + 14, y + 40), L.SMALL_SIZE, L.SILVER, weight=400)
         return
     xs, ys = [p[0] for p in pts.values()], [p[1] for p in pts.values()]
     bw, bh = max(xs) - min(xs) or 1.0, max(ys) - min(ys) or 1.0
-    inner_x, inner_y, inner_w, inner_h = x + 30, y + 66, w - 60, h - 96
+    inner_x, inner_y, inner_w, inner_h = x + 24, y + 18, w - 48, h - 36
     s = min(inner_w / bw, inner_h / bh)
     ox = inner_x + (inner_w - bw * s) / 2 - min(xs) * s
     oy = inner_y + (inner_h - bh * s) / 2 - min(ys) * s
@@ -226,9 +228,9 @@ def draw_pose_inset(canvas: np.ndarray, pose: Optional[PoseState], text: TextDra
 
     for a, b in SKELETON:
         if a in pts and b in pts:
-            cv2.line(canvas, pt(a), pt(b), L.VIOLET, 3)
+            cv2.line(canvas, pt(a), pt(b), L.VIOLET_LIGHT, 3)
     for n in pts:
-        cv2.circle(canvas, pt(n), 5, L.VIOLET, -1)
+        cv2.circle(canvas, pt(n), 5, L.VIOLET_LIGHT, -1)
 
 
 def segment_angle_signed(a: tuple, b: tuple) -> float:
@@ -239,22 +241,21 @@ def segment_angle_signed(a: tuple, b: tuple) -> float:
 
 def draw_joint_table(canvas: np.ndarray, pose: Optional[PoseState], text: TextDrawer, min_conf: float) -> None:
     x, y, w, h = L.TABLE_RECT
-    col1, col2, col3 = x + 16, x + w - 340, x + w - 170
-    text.queue("Joint Angles", (col1, y + 24), 24, L.VIOLET, weight=600)
-    text.queue("Left Side", (col2, y + 28), L.TABLE_SIZE, L.GRAY, weight=600)
-    text.queue("Right Side", (col3, y + 28), L.TABLE_SIZE, L.GRAY, weight=600)
-    cv2.line(canvas, (x, y + 66), (x + w, y + 66), L.LINE, 1)
+    col1, col2, col3 = x + 20, x + w - 460, x + w - 220
+    text.queue("Joint Angles", (col1, y + 12), 24, L.VIOLET_TEXT, weight=600)
+    text.queue("Left Side", (col2, y + 14), L.TABLE_SIZE, L.GRAY, weight=600)
+    text.queue("Right Side", (col3, y + 14), L.TABLE_SIZE, L.GRAY, weight=600)
+    cv2.line(canvas, (x, y + 50), (x + w, y + 50), L.LINE, 1)
 
     def joint(side: str, name: str):
         kp = pose.keypoints.get(f"{side}_{name}") if pose else None
         return (kp[0], kp[1]) if kp and kp[2] >= min_conf else None
 
     for i, (label, upper, lower) in enumerate(TABLE_ROWS):
-        ry = y + 110 + i * 90
+        ry = y + 72 + i * 48
         text.queue(label, (col1, ry), L.TABLE_SIZE, L.INK, weight=500)
         for col, side in ((col2, "left"), (col3, "right")):
             a, b = joint(side, upper), joint(side, lower)
             val = f"{segment_angle_signed(a, b):.0f}°" if a and b else "--"
             text.queue(val, (col, ry), L.TABLE_SIZE, L.INK, weight=500)
-        if i < len(TABLE_ROWS) - 1:
-            cv2.line(canvas, (x, ry + 28), (x + w, ry + 28), L.SURFACE_ALT, 1)
+
