@@ -11,7 +11,7 @@ Driveway shot tracker build log. Milestones M0–M6 per the build plan.
 | M2 Shot logic | **done** 2026-08-11 — 23/23 after verification-round fixes | owner substituted 23 labeled clips for the 50-shot clip; caveats in M2 summary |
 | M3 Pose | **done** 2026-08-11 — form on 23/23 shots (target 80%), scorecard held 23/23 after verification fixes | zero-shot RF-DETR Keypoint, rfdetr==1.9.2 pinned |
 | M4 Renderer | built 2026-08-11, demo set delivered — **awaiting owner sign-off** | 4 demo mp4s in sessions/demo/; homography click tool ready |
-| M5 Modes | **paused per owner (2026-08-11)** | no upload UI / live mode / nano training until owner resumes |
+| M5 Modes | upload half **done** 2026-08-11 (owner-requested); live half **paused per owner** | app/server.py, port 7878; verification round: 13 findings fixed |
 | M6 Precision + polish | not started | fine-tune inputs logged below |
 
 ## Detector v0 (bootstrap, training on Roboflow — poll, never retrain)
@@ -219,3 +219,13 @@ COCO-17 ordering verified by drawing indexed keypoints on real footage).
   (scripts/click_homography.py). 40 tests green. Awaiting owner sign-off =
   the M4 acceptance gate. Display units: km/h to match the reference look
   (jsonl stays m/s per plan 7).
+
+- **2026-08-11 (late)** — Owner: Roboflow-themed the renderer (dark Cool Gray
+  900 canvas, Violet accents, Inter, detection tabs with confidence), video
+  pane enlarged to 1500x844. Batch-rendered all 23 clips to
+  sessions/annotated-2026-08-11/. Owner paused M5's live half, requested the
+  upload half: built app/server.py (FastAPI drop-zone page, background
+  worker, progress polling, annotated mp4 + shots.jsonl downloads).
+  Verification round found 13 issues (worst: ffmpeg -shortest truncating the
+  annotated video to the audio track length; corrupt clips reporting done
+  with a phantom video path) — all fixed with regression tests. 45 tests.
