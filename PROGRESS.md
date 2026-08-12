@@ -229,3 +229,14 @@ COCO-17 ordering verified by drawing indexed keypoints on real footage).
   Verification round found 13 issues (worst: ffmpeg -shortest truncating the
   annotated video to the audio track length; corrupt clips reporting done
   with a phantom video path) — all fixed with regression tests. 45 tests.
+
+- **2026-08-11 (close)** — Owner parked the project at the upload platform:
+  drop a clip at http://127.0.0.1:7878, get the annotated video + stats.
+  Final cleanup: removed regenerable outputs (diag dumps, debug previews,
+  demo duplicates, probe uploads); kept footage/ and the 23 final videos in
+  sessions/annotated-2026-08-11/. State: M0–M3 done; M4 delivered (formal
+  look sign-off never explicitly given, owner said the output is "cool");
+  M5 upload half done, live half paused per owner; M6 not started. Resume
+  points: live mode (nano detector + webcam proof), rim keypoints for
+  rattle precision, homography clicks for the shot chart, fresh 60 fps
+  session for an unbiased re-eval. 45 tests green at close.
