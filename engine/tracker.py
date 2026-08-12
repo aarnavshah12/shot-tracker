@@ -136,10 +136,12 @@ class BallTracker:
                 return BallTrack(
                     x=det.cx, y=det.cy, vx=vx, vy=vy,
                     interpolated=False, bbox=det.bbox, velocity_valid=True,
+                    confidence=det.confidence,
                 )
         return BallTrack(
             x=det.cx, y=det.cy, vx=0.0, vy=0.0,
             interpolated=False, bbox=det.bbox, velocity_valid=False,
+            confidence=det.confidence,
         )
 
     def _extrapolate(self, track: BallTrack, dt: Optional[float]) -> BallTrack:

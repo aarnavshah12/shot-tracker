@@ -72,6 +72,7 @@ class BallTrack:
     interpolated: bool
     bbox: Optional[tuple[float, float, float, float]] = None
     velocity_valid: bool = True
+    confidence: Optional[float] = None  # detector confidence; None when extrapolated
 
 
 @dataclass(frozen=True)
