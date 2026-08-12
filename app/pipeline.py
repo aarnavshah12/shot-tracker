@@ -1,15 +1,15 @@
-"""Upload-mode pipeline: VideoFileSource -> ShotEngine -> EventLog (+ Renderer).
+"""Upload-mode pipeline: VideoFileSource -> ShotEngine -> EventLog + Renderer.
 
 This is wiring only. Shot logic lives in the engine; drawing in the renderer;
-file I/O here and in the event log. The upload *interface* (drag a clip, get
-an mp4 + stats back) arrives at M5 and calls this function.
+file I/O here and in the event log/sink. The upload interface (app/server.py)
+calls run_upload with a progress callback.
 """
 
 from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from engine.config import EngineConfig
 from engine.engine import Detector, PoseModel, ShotEngine
@@ -24,13 +24,11 @@ def run_upload(
     config: Optional[EngineConfig] = None,
     session_id: Optional[str] = None,
     sessions_root: str | Path = "sessions",
-    renderer=None,
+    render_video: bool = True,
+    initials: str = "AA",
+    progress: Optional[Callable[[int, int], None]] = None,
 ) -> dict:
-    """Process one clip offline; returns the session summary dict.
-
-    ``renderer`` stays None until M4; when set, annotated output writing is
-    added here (never inside the engine).
-    """
+    """Process one clip offline; returns paths plus the session summary."""
     from sources.video_file import VideoFileSource  # deferred: needs OpenCV
 
     config = config or EngineConfig.upload()
@@ -38,13 +36,25 @@ def run_upload(
     session_dir = Path(sessions_root) / session_id
 
     engine = ShotEngine(config, detector=detector, pose_model=pose_model)
+    annotated: Optional[Path] = None
 
     with VideoFileSource(video_path) as source, EventLog(session_dir) as log:
+        renderer = sink = None
+        if render_video:
+            from render.renderer import Renderer, VideoSink
+
+            renderer = Renderer(config, initials=initials, total_frames=source.frame_count)
+            sink = VideoSink(session_dir / "annotated.mp4", source.fps)
+        total = source.frame_count or 0
+        done = 0
         for frame, t in source.frames():
             state = engine.process_frame(frame, t)
             log.consume(state)
             if renderer is not None:
-                renderer.draw(frame, state)
+                sink.write(renderer.draw(frame, state))
+            done += 1
+            if progress is not None:
+                progress(done, total)
         # A shot still open when the clip ends is a real trajectory end.
         log.consume_events(engine.finalize())
         log.write_session_metadata(
@@ -56,5 +66,13 @@ def run_upload(
                 "calibration": engine.calibration.to_metadata(),
             }
         )
+        if sink is not None:
+            annotated = sink.close(audio_source=video_path)
 
-    return session_summary(session_dir / "shots.jsonl")
+    return {
+        "session_id": session_id,
+        "session_dir": str(session_dir),
+        "annotated_video": str(annotated) if annotated else None,
+        "shots_jsonl": str(session_dir / "shots.jsonl"),
+        "summary": session_summary(session_dir / "shots.jsonl"),
+    }

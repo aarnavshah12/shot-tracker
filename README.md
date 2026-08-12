@@ -21,6 +21,15 @@ tests/     incl. the synthetic-parabola engine test
 
 The engine is frame-in/events-out and never knows where frames come from; upload and live mode differ only in source wrapper and model-size config.
 
+## Upload interface
+
+```
+.venv/bin/python -m app.server
+```
+
+Open http://127.0.0.1:7878, drop a clip, get the annotated mp4 + stats back.
+Everything runs locally.
+
 ## Development
 
 ```
