@@ -11,7 +11,7 @@ Driveway shot tracker build log. Milestones M0–M6 per the build plan.
 | M2 Shot logic | **done** 2026-08-11 — 23/23 after verification-round fixes | owner substituted 23 labeled clips for the 50-shot clip; caveats in M2 summary |
 | M3 Pose | **done** 2026-08-11 — form on 23/23 shots (target 80%), scorecard held 23/23 after verification fixes | zero-shot RF-DETR Keypoint, rfdetr==1.9.2 pinned |
 | M4 Renderer | built 2026-08-11, demo set delivered — **awaiting owner sign-off** | 4 demo mp4s in sessions/demo/; homography click tool ready |
-| M5 Modes | not started | |
+| M5 Modes | **paused per owner (2026-08-11)** | no upload UI / live mode / nano training until owner resumes |
 | M6 Precision + polish | not started | fine-tune inputs logged below |
 
 ## Detector v0 (bootstrap, training on Roboflow — poll, never retrain)
@@ -30,11 +30,8 @@ Project/version: `aarnavs-space/basketball-shooting-robot-kbsro` v1, training ID
 ## Waiting on owner (Aarnav)
 
 - M4 look sign-off (demo videos delivered).
-- **On hold per owner (2026-08-11): no new phone footage requests.** All work
-  proceeds on the existing 23-clip session. When the owner resumes filming:
-  60 fps preferred; a fresh labeled session would de-bias the M2/M6 evals;
-  homography chalk-marks + clicks enable the shot chart. None of it blocks
-  M5.
+- Optional, whenever: homography chalk-marks + clicks (shot chart), fresh
+  60 fps footage (M6 re-eval / fine-tune).
 
 ## M1 summary (2026-08-11)
 
