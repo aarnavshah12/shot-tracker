@@ -29,14 +29,12 @@ Project/version: `aarnavs-space/basketball-shooting-robot-kbsro` v1, training ID
 
 ## Waiting on owner (Aarnav)
 
-- **50-shot ground-truth labels** — the M2 acceptance gate. First session (17
-  clips) is in; a labeled ~50-shot session (60 fps please) is the next input.
-- ~~Confirm 7103 / 7097~~ — answered 2026-08-11: 7103 is a real (missed)
-  attempt the engine failed to segment; 7097 is a genuine rattle-in make
-  (engine verdict was correct).
-- Future sessions: shoot at **60 fps** (current clips are 30 fps; crossing
-  frames are sparse and soft launches blur below the release threshold).
-- Homography clicks + look sign-off at M4.
+- M4 look sign-off (demo videos delivered).
+- **On hold per owner (2026-08-11): no new phone footage requests.** All work
+  proceeds on the existing 23-clip session. When the owner resumes filming:
+  60 fps preferred; a fresh labeled session would de-bias the M2/M6 evals;
+  homography chalk-marks + clicks enable the shot chart. None of it blocks
+  M5.
 
 ## M1 summary (2026-08-11)
 
